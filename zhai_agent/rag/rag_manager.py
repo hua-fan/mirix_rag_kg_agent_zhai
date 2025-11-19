@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
+import logging
 import os
 from typing import List
 from langchain_core.documents import Document
-from zhai_agent.llm.llm_client import get_llm_client
-from zhai_agent.rag.document_reranker import get_document_reranker
-from config import settings
-from zhai_agent.prompt.prompt_builder import PromptBuilder
+from ..llm.llm_client import get_llm_client
+from ..rag.document_reranker import get_document_reranker
+from ..config import settings
+from ..prompt.prompt_builder import PromptBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class RAGManager:
@@ -42,7 +45,7 @@ class RAGManager:
             retrieved_docs = retriever.invoke(query)
             return retrieved_docs
         except Exception as e:
-            print(f"检索文档时出错: {str(e)}")
+            logger.error(f"检索文档时出错: {str(e)}")
             return []
     
     def reRank(self, retrieved_docs: List[Document], query: str) -> List[Document]:

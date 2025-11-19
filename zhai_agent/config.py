@@ -1,9 +1,12 @@
 # zhai_agent/config.py
 import os
+import logging
 from dotenv import load_dotenv
 
 # 加载 .env 文件
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 class Config:
     # --- LLM 配置 ---

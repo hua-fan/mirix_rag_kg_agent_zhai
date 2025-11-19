@@ -6,8 +6,11 @@
 import json
 import redis
 import uuid
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class ShortMemory:
@@ -32,12 +35,12 @@ class ShortMemory:
             # 测试连接
             self.redis_client.ping()
             self.is_connected = True
-            print(f"成功连接到Redis服务器: {host}:{port} 数据库: {db}")
+            logger.info(f"成功连接到Redis服务器: {host}:{port} 数据库: {db}")
         except (redis.ConnectionError, redis.TimeoutError) as e:
             self.redis_client = None
             self.is_connected = False
-            print(f"无法连接到Redis服务器: {str(e)}")
-            print("将使用内存模式作为后备")
+            logger.error(f"无法连接到Redis服务器: {str(e)}")
+            logger.warning("将使用内存模式作为后备")
             # 创建内存中的临时存储作为后备
             self._memory_store = {}
         
@@ -99,15 +102,15 @@ class ShortMemory:
             if self.is_connected and self.redis_client:
                 # 存储到Redis并设置过期时间
                 self.redis_client.setex(key, self.memory_ttl, memory_data)
-                print(f"成功将用户记忆存储到Redis: {user_id}")
+                logger.info(f"成功将用户记忆存储到Redis: {user_id}")
             else:
                 # 使用内存存储作为后备
                 self._memory_store[key] = memory_data
-                print(f"使用内存存储用户记忆: {user_id}")
+                logger.info(f"使用内存存储用户记忆: {user_id}")
 
             return True
         except Exception as e:
-            print(f"存储记忆时出错: {str(e)}")
+            logger.error(f"存储记忆时出错: {str(e)}")
             return False
     
     def get_memory(self, user_id: str) -> List[Dict[str, Any]]:
@@ -149,7 +152,7 @@ class ShortMemory:
                 return normalized_messages
             return []
         except Exception as e:
-            print(f"获取记忆时出错: {str(e)}")
+            logger.error(f"获取记忆时出错: {str(e)}")
             return []
     
     def add_message(self, user_id: str, message: Optional[Dict[str, Any]] = None, user_message: Optional[Dict[str, Any]] = None, **kwargs) -> bool:
@@ -213,7 +216,7 @@ class ShortMemory:
             
             return True
         except Exception as e:
-            print(f"添加消息到记忆时出错: {str(e)}")
+            logger.error(f"添加消息到记忆时出错: {str(e)}")
             return False
     
     def delete_memory(self, user_id: str) -> bool:
@@ -234,10 +237,10 @@ class ShortMemory:
                 if key in self._memory_store:
                     del self._memory_store[key]
             
-            print(f"已删除用户记忆: {user_id}")
+            logger.info(f"已删除用户记忆: {user_id}")
             return True
         except Exception as e:
-            print(f"删除记忆时出错: {str(e)}")
+            logger.error(f"删除记忆时出错: {str(e)}")
             return False
     
     def list_users(self) -> List[str]:
@@ -265,7 +268,7 @@ class ShortMemory:
             
             return sessions
         except Exception as e:
-            print(f"列出用户时出错: {str(e)}")
+            logger.error(f"列出用户时出错: {str(e)}")
             return []
     
     def update_ttl(self, user_id: str, ttl: Optional[int] = None) -> bool:
@@ -293,7 +296,7 @@ class ShortMemory:
                 return True
             return False
         except Exception as e:
-            print(f"更新TTL时出错: {str(e)}")
+            logger.error(f"更新TTL时出错: {str(e)}")
             return False
 
 

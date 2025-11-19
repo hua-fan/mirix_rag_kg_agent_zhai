@@ -2,7 +2,10 @@ from neo4j import GraphDatabase, exceptions
 from typing import List, Dict, Optional, Union
 from datetime import datetime
 import re
-from config import settings
+import logging
+from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 URI = "neo4j://localhost:7687"
 AUTH = ("neo4j", "huafan123")
@@ -21,7 +24,7 @@ class KGStorage:
             )
             # 测试连接
             self.driver.verify_connectivity()
-            print("✅ Neo4j图库连接成功")
+            logger.info("✅ Neo4j图库连接成功")
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ Neo4j连接失败：{str(e)}")
         except exceptions.ServiceUnavailable as e:
@@ -110,13 +113,13 @@ class KGStorage:
                 metadata = entity.get("metadata", {})
                 
                 if not entity_name or not entity_type:
-                    print(f"⚠️ 跳过无效实体：{entity}（缺少name或type）")
+                    logger.warning(f"⚠️ 跳过无效实体：{entity}（缺少name或type）")
                     continue
                 
                 result = self.create_entity(entity_name, entity_type, metadata)
                 results.append(result)
             except Exception as e:
-                print(f"⚠️ 创建实体失败：{entity}，错误：{str(e)}")
+                logger.error(f"⚠️ 创建实体失败：{entity}，错误：{str(e)}")
                 continue
         return results
 
@@ -461,7 +464,7 @@ class KGStorage:
             try:
                 required_fields = ["subj_name", "subj_type", "rel_type", "obj_name", "obj_type"]
                 if not all(field in rel for field in required_fields):
-                    print(f"⚠️ 跳过无效关系：{rel}（缺少必填字段）")
+                    logger.warning(f"⚠️ 跳过无效关系：{rel}（缺少必填字段）")
                     continue
                 
                 result = self.create_relationship(
@@ -474,7 +477,7 @@ class KGStorage:
                 )
                 results.append(result)
             except Exception as e:
-                print(f"⚠️ 创建关系失败：{rel}，错误：{str(e)}")
+                logger.error(f"⚠️ 创建关系失败：{rel}，错误：{str(e)}")
                 continue
         return results
 
@@ -676,7 +679,7 @@ class KGStorage:
                 result = session.run(cypher, **params)
                 return [record.data() for record in result]
         except exceptions.Neo4jError as e:
-            print(f"⚠️ Cypher执行失败：{str(e)}，Cypher语句：{cypher}，参数：{params}")
+            logger.error(f"⚠️ Cypher执行失败：{str(e)}，Cypher语句：{cypher}，参数：{params}")
             return []
 
     def get_graph_stats(self) -> Dict:
@@ -712,7 +715,7 @@ class KGStorage:
                     
                 return stats
         except Exception as e:
-            print(f"⚠️ 获取统计信息失败: {str(e)}")
+            logger.error(f"⚠️ 获取统计信息失败: {str(e)}")
             return {}
 
     def clear_database(self) -> bool:
@@ -724,7 +727,7 @@ class KGStorage:
         """
         confirm = input("⚠️ 警告：此操作将删除所有节点和关系，是否继续？(y/n)：")
         if confirm.lower() != "y":
-            print("✅ 已取消清空操作")
+            logger.info("✅ 已取消清空操作")
             return False
         
         cypher = """
@@ -735,7 +738,7 @@ class KGStorage:
         try:
             with self.driver.session() as session:
                 result = session.run(cypher).single()
-                print(f"✅ 已删除 {result['deleted_count']} 个节点")
+                logger.info(f"✅ 已删除 {result['deleted_count']} 个节点")
                 return True
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ 清空数据库失败：{str(e)}")
@@ -744,7 +747,7 @@ class KGStorage:
         """关闭数据库连接"""
         if hasattr(self, 'driver') and self.driver:
             self.driver.close()
-            print("✅ Neo4j连接已关闭")
+            logger.info("✅ Neo4j连接已关闭")
 
     def __del__(self):
         """析构函数：自动关闭连接"""

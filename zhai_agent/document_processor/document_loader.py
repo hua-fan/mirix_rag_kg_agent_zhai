@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
+import logging
 import os
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentLoader:
@@ -45,8 +48,8 @@ class DocumentLoader:
                     loader = TextLoader(file_path, encoding='utf-8')
                     docs = loader.load()
                     documents.extend(docs)
-                print(f"已加载文件: {filename}")
+                logger.info(f"已加载文件: {filename}")
             except Exception as e:
-                print(f"加载文件 {filename} 时出错: {str(e)}")
+                logger.error(f"加载文件 {filename} 时出错: {str(e)}")
         
         return documents

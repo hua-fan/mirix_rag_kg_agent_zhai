@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import logging
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -15,6 +16,8 @@ try:
     SENTENCE_TRANSFORMERS_AVAILABLE = True
 except ImportError:
     pass
+
+logger = logging.getLogger(__name__)
 
 
 class VectorStoreManager:
@@ -48,7 +51,7 @@ class VectorStoreManager:
         )
         chunks = text_splitter.split_documents(documents)
         
-        print(f"文档已分割为 {len(chunks)} 块")
+        logger.info(f"文档已分割为 {len(chunks)} 块")
         
         # 嵌入模型 - 使用轻量级模型
         # 首先检查是否已有缓存的模型文件
@@ -65,23 +68,23 @@ class VectorStoreManager:
         # 定义一个简单的检查函数来测试网络连接
         def check_huggingface_connection():
             try:
-                print("检查与huggingface.co的网络连接...")
+                logger.info("检查与huggingface.co的网络连接...")
                 # 使用较短的超时时间快速检查
                 response = requests.head("https://hf-mirror.com", timeout=5)
-                print("成功连接到huggingface.co")
+                logger.info("成功连接到huggingface.co")
                 return True
             except requests.RequestException:
-                print("无法连接到huggingface.co，可能存在网络限制")
+                logger.warning("无法连接到huggingface.co，可能存在网络限制")
                 return False
         
         # 首先尝试使用假嵌入模型（最可靠的方式）
-        print("考虑到网络连接限制，优先使用假嵌入模型以确保程序正常运行")
+        logger.info("考虑到网络连接限制，优先使用假嵌入模型以确保程序正常运行")
         embeddings = FakeEmbeddings(size=384)
-        print("已初始化假嵌入模型")
+        logger.info("已初始化假嵌入模型")
         
         # 仅在有网络连接时尝试加载真实模型
         if check_huggingface_connection():
-            print("尝试加载HuggingFace嵌入模型...")
+            logger.info("尝试加载HuggingFace嵌入模型...")
             try:
                 # 先尝试直接使用LangChain的HuggingFaceEmbeddings
                 embeddings = HuggingFaceEmbeddings(
@@ -89,14 +92,14 @@ class VectorStoreManager:
                     model_kwargs={'device': 'cpu'},
                     cache_folder="./models_cache"
                 )
-                print("成功加载HuggingFace嵌入模型")
+                logger.info("成功加载HuggingFace嵌入模型")
             except Exception as e:
-                print(f"加载HuggingFace模型时出错: {str(e)}")
-                print("继续使用假嵌入模型")
+                logger.error(f"加载HuggingFace模型时出错: {str(e)}")
+                logger.info("继续使用假嵌入模型")
         else:
-            print("由于网络限制，将继续使用假嵌入模型")
-            print("提示：在实际生产环境中，建议预先下载模型并配置离线使用")
-            print("或考虑使用本地托管的嵌入服务")
+            logger.warning("由于网络限制，将继续使用假嵌入模型")
+            logger.info("提示：在实际生产环境中，建议预先下载模型并配置离线使用")
+            logger.info("或考虑使用本地托管的嵌入服务")
         
         # 创建向量存储
         vectorstore = FAISS.from_documents(chunks, embeddings)
@@ -118,17 +121,17 @@ class VectorStoreManager:
             docs_list = list(all_docs) if isinstance(all_docs, dict) else list(all_docs)
             # 创建向量检索器
             vector_retriever = vectorstore.as_retriever(search_kwargs={"k": k})
-            print(f"已创建向量检索器")
+            logger.info("已创建向量检索器")
             # 创建BM25检索器
             bm25_retriever = BM25Retriever.from_documents(docs_list)
             bm25_retriever.k = k  # 设置BM25检索的文档数量
-            print(f"已创建BM25关键词检索器")
+            logger.info("已创建BM25关键词检索器")
             # 创建混合检索器，权重可以根据需要调整
             ensemble_retriever = EnsembleRetriever(
                 retrievers=[vector_retriever, bm25_retriever],
                 weights=[0.7, 0.3]  # 向量检索权重0.7，BM25权重0.3
             )
-            print(f"已创建混合检索器，结合向量检索和BM25关键词检索")
+            logger.info("已创建混合检索器，结合向量检索和BM25关键词检索")
 
             self.retriever = ensemble_retriever
             return ensemble_retriever

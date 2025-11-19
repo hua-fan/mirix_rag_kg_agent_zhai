@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import logging
 from langgraph.graph.state import StateGraph
 from langgraph.graph import END
 from typing import Dict, Any
@@ -8,6 +9,8 @@ from zhai_agent.models.chat_state import ChatState
 from zhai_agent.rag.rag_manager import RAGManager
 from zhai_agent.workflow.workflow_nodes import WorkflowNodes
 from zhai_agent.mirix_memory.memory_agent import MirixMemoryAgent
+
+logger = logging.getLogger(__name__)
 
 class WorkflowManager:
     """
@@ -122,7 +125,7 @@ class WorkflowManager:
             result = self.app.invoke(inputs)
             return result
         except Exception as e:
-            print(f"工作流执行出错: {e}")
+            logger.error(f"工作流执行出错: {e}")
             import traceback
             traceback.print_exc()
             return {"error": str(e)}
@@ -136,6 +139,6 @@ class WorkflowManager:
             graph_image = self.app.get_graph().draw_mermaid_png()
             with open(output_file, "wb") as f:
                 f.write(graph_image)
-            print(f"工作流图表已保存为 {output_file}")
+            logger.info(f"工作流图表已保存为 {output_file}")
         except Exception as e:
-            print(f"可视化失败 (可能是缺少依赖): {e}")
+            logger.error(f"可视化失败 (可能是缺少依赖): {e}")

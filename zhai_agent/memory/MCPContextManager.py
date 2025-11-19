@@ -3,14 +3,17 @@
 MCP上下文管理器模块
 提供会话上下文管理功能，使用MemoryManager处理记忆操作
 """
+import logging
 from typing import List, Dict, Any, Optional
 from contextlib import contextmanager
 from datetime import datetime
 import uuid
-from config import settings
+from ..config import settings
 from zhai_agent.memory.shortmemory import ShortMemory
 from zhai_agent.memory.longmemory import get_longmemory_instance
 from zhai_agent.memory.memory_manager import MemoryManager, ShortTermMemoryBackend, LongTermMemoryBackend
+
+logger = logging.getLogger(__name__)
 
 
 class MCPContextManager:
@@ -63,7 +66,7 @@ class MCPContextManager:
         self.context_history = []
         self.is_active = False
         
-        print(f"MCPContextManager初始化成功，用户ID: {user_id}")
+        logger.info(f"MCPContextManager初始化成功，用户ID: {user_id}")
     
     def __enter__(self):
         """
@@ -74,7 +77,7 @@ class MCPContextManager:
         # 加载短期记忆并确保格式统一
         memories = self.memory_manager.get_short_memory(self.user_id)
         self.context_history = self._normalize_messages_format(memories)
-        print(f"进入上下文，已加载{len(self.context_history)}条短期记忆")
+        logger.info(f"进入上下文，已加载{len(self.context_history)}条短期记忆")
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -85,7 +88,7 @@ class MCPContextManager:
         # 保存短期记忆
         if self.context_history:
             self.memory_manager.store_short_memory(self.user_id, self.context_history)
-            print(f"退出上下文，已保存{len(self.context_history)}条短期记忆到短期存储")
+            logger.info(f"退出上下文，已保存{len(self.context_history)}条短期记忆到短期存储")
         
         self.is_active = False
         # 如果有异常，返回False让异常继续传播
@@ -150,12 +153,12 @@ class MCPContextManager:
             result = self.memory_manager.add_message(self.user_id, message_dict, importance_score)
             
             if importance_score >= self.memory_manager.long_memory_importance_threshold:
-                print(f"消息重要性为{importance_score}，已保存到长期记忆")
+                logger.info(f"消息重要性为{importance_score}，已保存到长期记忆")
             
             return result
             
         except Exception as e:
-            print(f"添加消息到上下文时出错: {str(e)}")
+            logger.error(f"添加消息到上下文时出错: {str(e)}")
             return False
     
     def add_user_message(self, content: str, importance_score: float = 0.0):
@@ -204,7 +207,7 @@ class MCPContextManager:
                 all_messages.sort(key=lambda x: x.get('timestamp', datetime.now().isoformat()))
                 messages = all_messages
             except Exception as e:
-                print(f"获取长期记忆时出错: {str(e)}")
+                logger.error(f"获取长期记忆时出错: {str(e)}")
         
         # 如果设置了限制，只返回最新的消息
         if limit and len(messages) > limit:
@@ -250,14 +253,14 @@ class MCPContextManager:
                 long_memories = self.memory_manager.get_long_memory(self.user_id)
                 long_memory_count = len(long_memories)
             except Exception as e:
-                print(f"获取长期记忆数量时出错: {str(e)}")
+                logger.error(f"获取长期记忆数量时出错: {str(e)}")
             
             return {
                 'short_memory_count': short_memory_count,
                 'long_memory_count': long_memory_count
             }
         except Exception as e:
-            print(f"获取统计信息时出错: {str(e)}")
+            logger.error(f"获取统计信息时出错: {str(e)}")
             return {
                 'short_memory_count': len(self.context_history),
                 'long_memory_count': 0
@@ -394,13 +397,13 @@ class MCPContextManager:
                 if message_content in result.get('content', ''):
                     # 这里简化处理，实际可能需要额外的查询来获取memory_id
                     # 或者修改longmemory.py提供按内容更新的方法
-                    print(f"警告：无法直接更新重要性分数，缺少memory_id")
+                    logger.warning(f"警告：无法直接更新重要性分数，缺少memory_id")
                     return False
             
             return success
             
         except Exception as e:
-            print(f"更新记忆重要性时出错: {str(e)}")
+            logger.error(f"更新记忆重要性时出错: {str(e)}")
             return False
     
     def clear_short_memory(self):
@@ -419,10 +422,10 @@ class MCPContextManager:
                 result = self.memory_manager.short_memory.short_memory.delete_memory(self.user_id)
             if result:
                 self.context_history = []
-                print(f"短期记忆已清除")
+                logger.info(f"短期记忆已清除")
             return result
         except Exception as e:
-            print(f"清除短期记忆时出错: {str(e)}")
+            logger.error(f"清除短期记忆时出错: {str(e)}")
             return False
     
     def clear_long_memory(self, specific_memory_id: Optional[int] = None):
@@ -443,10 +446,10 @@ class MCPContextManager:
                 # 回退到直接调用底层实例
                 result = self.memory_manager.long_memory.long_memory.delete_memory(self.user_id, specific_memory_id)
             if result:
-                print(f"{f'特定ID({specific_memory_id})的' if specific_memory_id else '用户'}长期记忆已清除")
+                logger.info(f"{f'特定ID({specific_memory_id})的' if specific_memory_id else '用户'}长期记忆已清除")
             return result
         except Exception as e:
-            print(f"清除长期记忆时出错: {str(e)}")
+            logger.error(f"清除长期记忆时出错: {str(e)}")
             return False
     
     def format_context_as_prompt(self, include_long_memory: bool = False) -> str:

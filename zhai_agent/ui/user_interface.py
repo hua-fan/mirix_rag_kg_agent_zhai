@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
-from typing import Dict, Any
+import logging
+from typing import List, Dict, Any
 from zhai_agent.models.chat_state import ChatState
 from langchain_core.messages import HumanMessage
+
+logger = logging.getLogger(__name__)
 
 
 class UserInterface:
@@ -57,6 +60,7 @@ class UserInterface:
             if message_type == "ai":
                 message_content = last_message.get('content') if isinstance(last_message, dict) else getattr(last_message, 'content', '')
                 print(f"\nAI: {message_content}")
+                logger.debug(f"显示AI响应: {message_content[:100]}...")
             
             # 如果使用了RAG功能，询问是否显示检索的文档
             if result and 'retrieved_documents' in result and result['retrieved_documents']:
@@ -72,12 +76,10 @@ class UserInterface:
         show_docs = input("\n是否显示检索到的参考文档？(y/n): ")
         if show_docs.lower() == 'y':
             print("\n=== 检索到的参考文档 ===")
-            for i, doc in enumerate(retrieved_documents, 1):
+            for i, doc in enumerate(retrieved_documents[:3], 1):
                 print(f"\n[文档 {i}]")
-                # 控制显示的文档内容长度
-                content_preview = doc['content'][:500] + '...' if len(doc['content']) > 500 else doc['content']
+                content_preview = doc['content'][:200] + "..." if len(doc['content']) > 200 else doc['content']
                 print(content_preview)
-                # 显示元数据
                 if 'metadata' in doc and doc['metadata']:
                     print(f"来源: {doc['metadata'].get('source', '未知')}")
     

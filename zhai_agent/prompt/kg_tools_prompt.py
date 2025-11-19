@@ -1,4 +1,4 @@
-def _build_intelligent_system_prompt(self, memory_context: str) -> str:
+def _build_intelligent_system_prompt(memory_context: str) -> str:
         """
         构建智能系统提示词，包含kg工具使用说明
         """

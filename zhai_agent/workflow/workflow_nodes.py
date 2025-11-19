@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Dict, Any, List
 from zhai_agent.models.chat_state import ChatState
 from zhai_agent.rag.rag_manager import RAGManager
@@ -12,6 +13,9 @@ from zhai_agent.prompt.mirix_memory_prompt import build_mirix_memory_prompt
 from zhai_agent.kg.kg_tools import get_kg_tools
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from zhai_agent.memory.MCPContextManager import get_mcp_context
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 class WorkflowNodes:
     """
@@ -65,7 +69,7 @@ class WorkflowNodes:
             
             # 2. 构建专门的知识提取 Prompt
             # 强制 LLM 只关注提取信息，不要通过 content 说话
-            system_prompt = PromptBuilder.get_kg_tools_prompt(state.memory_context)
+            system_prompt = self.prompt_builder.get_kg_tools_prompt(state.memory_context)
             
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -82,22 +86,22 @@ class WorkflowNodes:
             # 4. 处理工具调用
             tool_calls = llm_response.get("tool_calls")
             if tool_calls:
-                print(f"🏗️ [KG Build] 正在提取知识，调用 {len(tool_calls)} 个工具...")
+                logger.info(f"[KG Build] 正在提取知识，调用 {len(tool_calls)} 个工具")
                 
                 # 执行所有工具 (存入 Neo4j)
                 tool_results = self._execute_tool_calls(tool_calls, self.kg_tools)
                 
                 # 记录日志即可，不需要将结果写回 state.messages 干扰聊天历史
                 for res in tool_results:
-                    print(f"  - 工具执行结果: {res['result']}")
+                    logger.debug(f"工具执行结果: {res['result']}")
             else:
-                print("👀 [KG Build] 本轮对话无新知识需要提取。")
+                logger.debug("[KG Build] 本轮对话无新知识需要提取")
                 
             # 注意：这里直接返回 state，不对 state.messages 做任何修改
             # 这样它就像一个透明的过滤器
 
         except Exception as e:
-            print(f"❌ 知识图谱构建节点出错: {str(e)}")
+            logger.error(f"知识图谱构建节点出错: {str(e)}")
             # 出错也不影响主流程
             
         return {}
@@ -122,10 +126,10 @@ class WorkflowNodes:
             ai_message = AIMessage(content=ai_response)
             state.messages.append(ai_message)
             
-            print(f"纯聊天回复: {ai_response[:100]}...")
+            logger.debug(f"纯聊天回复: {ai_response[:100]}...")
             
         except Exception as e:
-            print(f"聊天节点出错: {str(e)}")
+            logger.error(f"聊天节点出错: {str(e)}")
             # 添加错误回复
             error_response = "抱歉，我在处理您的消息时遇到了问题。请稍后再试。"
             ai_message = AIMessage(content=error_response)
@@ -148,7 +152,7 @@ class WorkflowNodes:
                 if memory_context:
                     return f"用户记忆信息：\n{memory_context}"
         except Exception as e:
-            print(f"获取mirix记忆失败: {str(e)}")
+            logger.warning(f"获取mirix记忆失败: {str(e)}")
         
         # 回退到普通记忆
         try:
@@ -159,7 +163,7 @@ class WorkflowNodes:
                 if memories:
                     return self._format_conversation_history(memories)
         except Exception as e:
-            print(f"获取普通记忆失败: {str(e)}")
+            logger.warning(f"获取普通记忆失败: {str(e)}")
         
         return "暂无相关记忆信息"
     
@@ -187,7 +191,7 @@ class WorkflowNodes:
                         "call_id": tool_call.id,
                         "result": str(result)
                     })
-                    print(f"工具调用成功: {function_name} -> {result}")
+                    logger.info(f"工具调用成功: {function_name} -> {result}")
                 else:
                     results.append({
                         "call_id": tool_call.id,
@@ -196,7 +200,7 @@ class WorkflowNodes:
                     
             except Exception as e:
                 error_msg = f"工具调用失败: {str(e)}"
-                print(error_msg)
+                logger.error(error_msg)
                 results.append({
                     "call_id": tool_call.id,
                     "result": error_msg
@@ -213,7 +217,11 @@ class WorkflowNodes:
             dict: 更新后的状态
         """
         # 获取用户最后一条消息
-        user_message = state.messages[-1].get('content', '') if state.messages else ""
+        if state.messages:
+            last_message = state.messages[-1]
+            user_message = last_message.content if hasattr(last_message, 'content') else str(last_message)
+        else:
+            user_message = ""
         state.query = user_message
         # 执行文档检索
         retrieved_docs = self._retrieve_documents(user_message)
@@ -273,145 +281,55 @@ class WorkflowNodes:
             else:
                 user_message = ""
             
-            # 构建详细的系统提示，明确指导LLM使用工具
-            system_prompt = PromptBuilder.get_kg_search_prompt(state.memory_context)
+            # 构建系统提示
+            system_prompt = self.prompt_builder.get_kg_search_prompt(state.memory_context)
                 
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ]
+            
+            # 调用支持工具的LLM进行查询
             llm_response = self.rag_manager.llm_client.create_chat_completion(
                 messages=messages,
-                tools=self.openai_search_tools, # 直接使用
+                tools=self.openai_search_tools,
                 tool_choice="auto",
                 temperature=0.1
             )
             
-            print(f"获取到 {len(self.openai_search_tools)} 个工具")
-            
-            # 详细检查每个工具
-            for i, tool in enumerate(self.kg_tools):
-                tool_name = getattr(tool, 'name', f'unknown_{i}')
-                tool_type = type(tool)
-                print(f"工具 {i}: name='{tool_name}', type={tool_type}")
-            
-            # 调试：直接查看知识图谱中的实体统计
-            try:
-                from zhai_agent.kg.kg_tools import get_graph_stats
-                stats = get_graph_stats({})
-                print(f"\n📊 知识图谱统计: {str(stats)[:200]}...")
-            except Exception as e:
-                print(f"\n获取图谱统计失败: {e}")
-            
-            # 过滤出仅查询工具并记录
-            query_tools = []
-            for tool in self.kg_tools:
-                if hasattr(tool, 'name') and tool.name in ['kg_search_entities', 'kg_get_entity', 'kg_get_graph_stats']:
-                    query_tools.append(tool)
-
-            print(f"可用知识图谱查询工具: {[tool.name for tool in query_tools]}")
-            
-            # 如果没有找到工具，尝试使用所有工具
-            if not query_tools:
-                print("⚠️  未找到指定的查询工具，尝试使用所有工具...")
-                query_tools = self.kg_tools
-                print(f"使用所有工具: {[getattr(tool, 'name', 'unknown') for tool in query_tools]}")
-                
-                # 如果仍然没有工具，创建模拟工具
-                if not query_tools:
-                    print("❌ 没有任何工具可用，创建模拟工具...")
-                    # 这里可以添加模拟工具或错误处理
-            
-            # 将工具转换为OpenAI格式
-            tools = self.openai_search_tools
-            
-            # 调用支持工具的LLM进行查询 - 强制使用工具
-            llm_response = self.rag_manager.llm_client.create_chat_completion(
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",  # 强制LLM必须使用工具
-                temperature=0.1  # 降低温度以提高确定性
-            )
-            
-            # 详细监控工具调用情况
+            # 处理工具调用
             tool_usage_info = []
             
-            # 处理工具调用
             if llm_response.get("tool_calls"):
-                print(f"\n✓ LLM决定调用 {len(llm_response['tool_calls'])} 个知识图谱查询工具")
+                logger.info(f"LLM调用 {len(llm_response['tool_calls'])} 个知识图谱工具")
                 
                 # 执行工具调用
-                tool_results = self._execute_tool_calls(llm_response["tool_calls"], query_tools)
+                tool_results = self._execute_tool_calls(llm_response["tool_calls"], self.kg_tools)
                 
-                # 收集所有查询结果并记录详细信息
+                # 收集查询结果
                 for i, tool_result in enumerate(tool_results):
                     tool_call = llm_response["tool_calls"][i]
-                    # 正确处理ChatCompletionMessageFunctionToolCall对象
-                    if hasattr(tool_call, 'function'):
-                        tool_name = getattr(tool_call.function, 'name', 'unknown')
-                        # 获取工具调用的参数
-                        if hasattr(tool_call.function, 'arguments'):
-                            try:
-                                import json
-                                args = json.loads(tool_call.function.arguments)
-                                print(f"  - 工具 {i+1}: {tool_name} 参数: {args}")
-                                
-                                # 如果搜索实体未找到结果，尝试不指定类型的搜索
-                                if tool_name == 'kg_search_entities' and '未找到包含' in str(tool_result['result']):
-                                    print(f"  - 搜索未找到结果，尝试不指定实体类型的搜索...")
-                                    # 重新搜索，不指定entity_type
-                                    from zhai_agent.kg.kg_tools import search_entities
-                                    retry_result = search_entities(args.get('keyword', ''))
-                                    print(f"  - 重新搜索结果: {str(retry_result)[:200]}...")
-                                    if '未找到包含' not in retry_result:
-                                        tool_result['result'] = retry_result
-                                        print(f"  - ✅ 重新搜索成功！")
-                                    else:
-                                        # 尝试直接查询所有实体
-                                        print(f"  - 尝试直接查询所有实体...")
-                                        try:
-                                            from zhai_agent.kg.kg_storage import KGStorage
-                                            storage = KGStorage()
-                                            all_entities = storage.search_entities('繁花')
-                                            print(f"  - 直接查询结果: 找到 {len(all_entities)} 个实体")
-                                            for entity in all_entities[:5]:
-                                                print(f"    - 实体: {entity.get('name', 'unknown')} (类型: {entity.get('type', 'unknown')})")
-                                        except Exception as debug_e:
-                                            print(f"  - 直接查询失败: {debug_e}")
-                                    
-                            except:
-                                pass
-                    else:
-                        tool_name = 'unknown'
+                    tool_name = getattr(tool_call.function, 'name', 'unknown') if hasattr(tool_call, 'function') else 'unknown'
                     tool_usage_info.append(f"工具: {tool_name}, 结果: {str(tool_result['result'])[:200]}")
-                    print(f"    结果: {str(tool_result['result'])[:200]}...")
             else:
-                print(f"\n✗ LLM未调用任何工具！")
-                print(f"  这可能是因为：")
-                print(f"  1. LLM认为不需要查询知识图谱")
-                print(f"  2. 系统提示不够明确")
-                print(f"  3. 工具选择逻辑问题")
-                tool_usage_info.append("LLM未调用任何工具")
+                logger.info("LLM未调用任何知识图谱工具")
+                tool_usage_info.append("未调用知识图谱工具")
             
             # 整合查询结果
-            if tool_usage_info:
-                kg_context_str = f"知识图谱查询情况:\n" + "\n".join(tool_usage_info)
-            else:
-                kg_context_str = "知识图谱中无相关信息"
+            kg_context_str = "\n".join(tool_usage_info) if tool_usage_info else "知识图谱中无相关信息"
             
-            # 将查询结果添加到提示词构建器中
+            # 将查询结果添加到状态
             state.kg_context = kg_context_str
             
         except Exception as e:
-            error_message = f"知识图谱搜索节点出错: {str(e)}"
-            print(error_message)
-            import traceback
-            traceback.print_exc()
+            error_msg = f"知识图谱搜索出错: {str(e)}"
+            logger.error(error_msg)
             
-            # 提供更有用的错误信息
-            error_context = f"知识图谱查询出错: {str(e)}\n这可能是因为：\n1. 知识图谱中没有相关信息\n2. 实体名称拼写不同\n3. 该实体尚未被记录到知识图谱中\n建议：可以询问用户的具体喜好，然后记录下来。"
+            # 错误处理
+            error_context = f"知识图谱查询出错: {str(e)}"
+            kg_context_str = error_context
             
-            # 将错误信息添加到提示词中
+            # 将错误信息添加到提示词构建器
             self.prompt_builder.kg_tmpl = error_context
         
         return {"kg_context": kg_context_str}
@@ -440,7 +358,7 @@ class WorkflowNodes:
         
         # 从上下文管理器获取记忆（包括短期和长期记忆）
         previous_messages = context_manager.get_context(include_long_memory=True, limit=10)
-        print(f"从MCPContextManager加载的消息数量: {len(previous_messages)}")
+        logger.debug(f"从MCPContextManager加载的消息数量: {len(previous_messages)}")
         
         # 格式化对话历史
         conversation_history = self._format_conversation_history(previous_messages)
@@ -463,9 +381,9 @@ class WorkflowNodes:
         if self.retriever:
             # 检索相关文档
             retrieved_docs = self.rag_manager.retrieve_documents(self.retriever, user_message)
-            print(f"\n已检索到 {len(retrieved_docs)} 个相关文档片段")
+            logger.debug(f"已检索到 {len(retrieved_docs)} 个相关文档片段")
         else:
-            print("\n未使用RAG增强，无文档检索步骤")
+            logger.debug("未使用RAG增强，无文档检索步骤")
         return retrieved_docs
     
 
@@ -499,9 +417,9 @@ class WorkflowNodes:
             # 移除最后一个换行符
             if conversation_history:
                 conversation_history = conversation_history.rstrip('\n')
-            print("已添加对话历史到提示中")
+            logger.debug("已添加对话历史到提示中")
         else:
-            print("无对话历史")
+            logger.debug("无对话历史")
         return conversation_history
 
 
@@ -517,7 +435,7 @@ class WorkflowNodes:
             kg_context=state.kg_context
         )
         
-        print(f"生成的最终提示:\n{final_prompt}")
+        logger.debug(f"生成的最终提示:\n{final_prompt}")
         return self.rag_manager.call_llm(final_prompt)
     
     def store_mirix_memory_node(self, state: ChatState) -> Dict[str, Any]:
@@ -560,9 +478,9 @@ class WorkflowNodes:
                     
                     # 获取并打印统计信息
                     stats = context_manager.get_stats()
-                    print(f"用户{user_id}统计: 短期记忆{stats['short_memory_count']}条, 长期记忆{stats['long_memory_count']}条")
+                    logger.info(f"用户{user_id}统计: 短期记忆{stats['short_memory_count']}条, 长期记忆{stats['long_memory_count']}条")
         except Exception as e:
-            print(f"保存对话到记忆时出错: {str(e)}")
+            logger.error(f"保存对话到记忆时出错: {str(e)}")
         return state.model_dump()
 
     
@@ -587,7 +505,7 @@ class WorkflowNodes:
         )
         
         user_id = context_manager.user_id
-        print(f"对话内容已通过MCPContextManager保存到用户: {user_id}")
+        logger.debug(f"对话内容已通过MCPContextManager保存到用户: {user_id}")
     
 
   

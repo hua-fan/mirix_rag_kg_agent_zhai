@@ -7,9 +7,12 @@ import psycopg2
 from psycopg2.extras import DictCursor
 import json
 import uuid
+import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from config import settings
+from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 class LongMemory:
     """ 使用PostgreSQL实现的长期记忆存储管理器 """
@@ -46,7 +49,7 @@ class LongMemory:
             )
             self.cursor = self.conn.cursor(cursor_factory=DictCursor)
             self.is_connected = True
-            print(f"成功连接到PostgreSQL服务器: {host}:{port} 数据库: {database}")
+            logger.info(f"成功连接到PostgreSQL服务器: {host}:{port} 数据库: {database}")
             
             # 创建表结构（如果不存在）
             self._create_tables()
@@ -55,8 +58,8 @@ class LongMemory:
             self.conn = None
             self.cursor = None
             self.is_connected = False
-            print(f"无法连接到PostgreSQL服务器: {str(e)}")
-            print("长期记忆功能将不可用")
+            logger.error(f"无法连接到PostgreSQL服务器: {str(e)}")
+            logger.warning("长期记忆功能将不可用")
     
     def _create_tables(self):
         """
@@ -112,11 +115,11 @@ class LongMemory:
             ''')
             
             self.conn.commit()
-            print("数据库表结构创建成功")
+            logger.info("数据库表结构创建成功")
             
         except Exception as e:
             self.conn.rollback()
-            print(f"创建数据库表结构时出错: {str(e)}")
+            logger.error(f"创建数据库表结构时出错: {str(e)}")
     
     def _ensure_user_exists(self, user_id: str):
         """
@@ -161,7 +164,7 @@ class LongMemory:
             
         except Exception as e:
             self.conn.rollback()
-            print(f"确保用户存在时出错: {str(e)}")
+            logger.error(f"确保用户存在时出错: {str(e)}")
     
     def store_memory(self, user_id: str, messages: List[Dict[str, Any]], importance_score: float = 0.0):
         """
@@ -218,12 +221,12 @@ class LongMemory:
                 ''', (user_id, message_id, message_type, content, json.dumps(metadata), msg_importance_score))
             
             self.conn.commit()
-            print(f"成功将用户记忆存储到PostgreSQL: {user_id}")
+            logger.info(f"成功将用户记忆存储到PostgreSQL: {user_id}")
             return True
             
         except Exception as e:
             self.conn.rollback()
-            print(f"存储长期记忆时出错: {str(e)}")
+            logger.error(f"存储长期记忆时出错: {str(e)}")
             return False
     
     def add_message(self, user_id: str, message: Dict[str, Any], importance_score: float = 0.0):
@@ -296,7 +299,7 @@ class LongMemory:
             return memories
             
         except Exception as e:
-            print(f"获取长期记忆时出错: {str(e)}")
+            logger.error(f"获取长期记忆时出错: {str(e)}")
             return []
     
     def search_memory(self, user_id: str, query: str, limit: int = 20):
@@ -347,7 +350,7 @@ class LongMemory:
             return memories
             
         except Exception as e:
-            print(f"搜索长期记忆时出错: {str(e)}")
+            logger.error(f"搜索长期记忆时出错: {str(e)}")
             return []
     
     def update_importance(self, memory_id: int, importance_score: float):
@@ -374,7 +377,7 @@ class LongMemory:
             
         except Exception as e:
             self.conn.rollback()
-            print(f"更新记忆重要性时出错: {str(e)}")
+            logger.error(f"更新记忆重要性时出错: {str(e)}")
             return False
     
     def delete_memory(self, user_id: str, memory_id: int = None):
@@ -410,7 +413,7 @@ class LongMemory:
             
         except Exception as e:
             self.conn.rollback()
-            print(f"删除长期记忆时出错: {str(e)}")
+            logger.error(f"删除长期记忆时出错: {str(e)}")
             return False
     
     def list_users(self):
@@ -431,7 +434,7 @@ class LongMemory:
             return [row['user_id'] for row in rows]
             
         except Exception as e:
-            print(f"列出用户时出错: {str(e)}")
+            logger.error(f"列出用户时出错: {str(e)}")
             return []
     
     def close(self):
@@ -443,7 +446,7 @@ class LongMemory:
         if self.conn:
             self.conn.close()
         self.is_connected = False
-        print("PostgreSQL连接已关闭")
+        logger.info("PostgreSQL连接已关闭")
 
 
 # 全局实例管理

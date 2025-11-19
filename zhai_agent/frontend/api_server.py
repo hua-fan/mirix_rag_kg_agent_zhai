@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 try:
     from zhai_agent.workflow.workflow_manager import WorkflowManager
 except ImportError:
-    print("无法导入WorkflowManager，请检查路径配置")
+    logger.error("无法导入WorkflowManager，请检查路径配置")
     exit(1)
 
 # 创建FastAPI应用实例
@@ -86,7 +86,7 @@ async def login(request: LoginRequest):
             )
         
         # 记录用户登录信息（这里只是打印，实际可以存储到数据库）
-        print(f"用户登录: 用户名={request.username}")
+        logger.info(f"用户登录: 用户名={request.username}")
 
         token = str(uuid.uuid4())
 
@@ -103,7 +103,7 @@ async def login(request: LoginRequest):
         )
         
     except Exception as e:
-        print(f"处理登录请求时出错: {str(e)}")
+        logger.error(f"处理登录请求时出错: {str(e)}")
         return LoginResponse(
             success=False,
             user_name="",
@@ -134,7 +134,7 @@ async def chat(
         if not request.message or not request.message.strip():
             raise HTTPException(status_code=400, detail="消息内容不能为空")
             
-        print(f"用户聊天: 用户名={user_name}, 消息={request.message[:20]}...")
+        logger.info(f"用户聊天: 用户名={user_name}, 消息={request.message[:20]}...")
 
         # 定义流式生成器
         async def event_stream():
@@ -173,16 +173,16 @@ async def chat(
                 # 情况 B: (可选) 只是为了调试，你可以推送后台状态
                 # 前端可以选择忽略这些类型的信息
                 if "kg_build" in event:
-                    print(f"后台任务：知识图谱构建完成")
+                    logger.debug(f"后台任务：知识图谱构建完成")
                 
                 if "save_memory" in event:
-                    print(f"后台任务：记忆保存完成")
+                    logger.debug(f"后台任务：记忆保存完成")
 
         # 返回流式响应，媒体类型设为 x-ndjson (Newline Delimited JSON)
         return StreamingResponse(event_stream(), media_type="application/x-ndjson")
         
     except Exception as e:
-        print(f"API 错误: {e}")
+        logger.error(f"API 错误: {e}")
         # 流式错误处理比较特殊，这里简单返回一个包含错误的 JSON
         return StreamingResponse(
             iter([json.dumps({"type": "error", "response": str(e)}, ensure_ascii=False) + "\n"]),

@@ -2,6 +2,9 @@
 from typing import List
 from langchain_core.documents import Document
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentReranker:
@@ -25,9 +28,9 @@ class DocumentReranker:
         """
         try:
             self.rerank_model = HuggingFaceCrossEncoder(model_name=self.model_name)
-            print(f"{self.model_name} 重排模型加载成功")
+            logger.info(f"{self.model_name} 重排模型加载成功")
         except Exception as e:
-            print(f"加载重排模型时出错: {str(e)}")
+            logger.error(f"加载重排模型时出错: {str(e)}")
             self.rerank_model = None
     
     def rerank_documents(self, retrieved_docs: List[Document], query: str) -> List[Document]:
@@ -55,15 +58,15 @@ class DocumentReranker:
                                                   key=lambda x: x[0], reverse=True)]
             
             # 记录重排结果
-            print(f"文档重排完成，共 {len(sorted_docs)} 个文档")
+            logger.info(f"文档重排完成，共 {len(sorted_docs)} 个文档")
             if sorted_docs:
                 # 打印前几个文档的相关性分数（为了调试）
-                print(f"前 {min(3, len(sorted_docs))} 个最相关文档已排序")
+                logger.debug(f"前 {min(3, len(sorted_docs))} 个最相关文档已排序")
             
             return sorted_docs
             
         except Exception as e:
-            print(f"重新排序文档时出错: {str(e)}")
+            logger.error(f"重新排序文档时出错: {str(e)}")
             # 出错时返回原始文档
             return retrieved_docs
     
@@ -88,7 +91,7 @@ class DocumentReranker:
             return scored_docs
             
         except Exception as e:
-            print(f"重新排序文档时出错: {str(e)}")
+            logger.error(f"重新排序文档时出错: {str(e)}")
             return [(doc, 0.0) for doc in retrieved_docs]
 
 

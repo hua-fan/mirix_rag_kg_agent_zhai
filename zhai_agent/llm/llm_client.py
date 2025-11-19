@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 import os
+import logging
 import openai
-from config import settings
+from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -23,7 +26,7 @@ class LLMClient:
         self.model_name = model_name or settings.DEEPSEEK_MODEL_NAME
         
         if not self.api_key:
-            print("警告: 未检测到 DEEPSEEK_API_KEY，LLM 功能可能不可用。")
+            logger.warning("未检测到 DEEPSEEK_API_KEY，LLM 功能可能不可用。")
     
     def call_model(self, prompt, temperature=0.8, max_tokens=2000):
         """
@@ -56,7 +59,7 @@ class LLMClient:
         except Exception as e:
             # 错误处理
             error_message = f"调用语言模型时出错: {str(e)}"
-            print(error_message)
+            logger.error(error_message)
             return error_message
     
     def create_chat_completion(self, messages, temperature=0.8, max_tokens=2000, tools=None, tool_choice=None):
@@ -114,7 +117,7 @@ class LLMClient:
         except Exception as e:
             # 错误处理
             error_message = f"创建聊天完成时出错: {str(e)}"
-            print(error_message)
+            logger.error(error_message)
             return {
                 "content": error_message,
                 "tool_calls": [],
