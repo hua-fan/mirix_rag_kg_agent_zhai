@@ -1,0 +1,9 @@
+agent_name: mirix
+model_name: gemini-2.5-flash
+model_endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+model_provider: google
+api_key: AIzaSyB69WkiCkwJUZwnpBG5DzJsIDrTnLPA340
+generation_config:
+  temperature: 0.8
+  max_tokens: 4096
+  context_window: 32768

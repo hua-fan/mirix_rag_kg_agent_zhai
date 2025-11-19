@@ -1,0 +1,11 @@
+langgraph
+openai
+langchain
+langchain-community
+faiss-cpu
+pypdf
+python-dotenv
+transformers
+sentence-transformers
+wxauto
+psycopg2-binary>=2.9.9

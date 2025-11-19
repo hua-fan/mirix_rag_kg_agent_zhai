@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZHAI助手 - 智能聊天系统</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- 登录界面 -->
+    <div id="login-container" class="login-container">
+        <div class="login-form">
+            <h2>欢迎使用翟助手</h2>
+            <p class="login-subtitle">请输入您的用户名开始聊天</p>
+            <input type="text" id="username-input" placeholder="请输入用户名" maxlength="20">
+            <button id="login-button" class="login-button">登录</button>
+        </div>
+    </div>
+
+    <!-- 聊天界面 -->
+    <div id="chat-container" class="chat-container" style="display: none;">
+        <div class="header">
+            <h1>翟助手</h1>
+            <div class="user-info">
+                <span id="current-user" class="current-user"></span>
+                <button id="logout-button" class="logout-button">退出</button>
+            </div>
+            <div class="status">
+                <span class="status-indicator"></span>
+                <span class="status-text">在线</span>
+            </div>
+        </div>
+        
+        <div class="chat-messages" id="chat-messages">
+            <div class="message bot-message">
+                <div class="message-content">
+                    <p>你好！我是zhai助手，有什么可以帮助你的吗？</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="input-area">
+            <textarea id="user-input" placeholder="输入你的问题..." rows="3"></textarea>
+            <button id="send-button" class="send-button">发送</button>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
