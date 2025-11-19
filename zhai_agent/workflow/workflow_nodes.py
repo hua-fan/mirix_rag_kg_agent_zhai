@@ -205,18 +205,6 @@ class WorkflowNodes:
         
         return results
 
-    def query_kg_node(self,state:ChatState) -> Dict[str,Any]:
-        """KG节点，用于查询知识图谱"""
-        # 获取用户最后一条消息
-        user_message = state.messages[-1].get('content', '') if state.messages else ""
-        # 调用知识图谱查询接口
-        kg_response = self.kg_manager.query_kg(user_message)
-        # 将查询结果添加到消息列表
-        state.messages.append(AIMessage(content=kg_response))
-
-
-        return state.model_dump()
-
     def rag_node(self, state: ChatState) -> Dict[str, Any]:
         """
         RAG节点，用于从知识库提取相关文档
@@ -296,7 +284,7 @@ class WorkflowNodes:
                 temperature=0.1
             )
             
-            print(f"获取到 {len(all_tools)} 个工具")
+            print(f"获取到 {len(self.openai_search_tools)} 个工具")
             
             # 详细检查每个工具
             for i, tool in enumerate(all_tools):
@@ -332,13 +320,13 @@ class WorkflowNodes:
                     # 这里可以添加模拟工具或错误处理
             
             # 将工具转换为OpenAI格式
-            tools = self._convert_tools_to_openai_format(query_tools)
+            tools = self.openai_search_tools
             
             # 调用支持工具的LLM进行查询 - 强制使用工具
             llm_response = self.rag_manager.llm_client.create_chat_completion(
                 messages=messages,
                 tools=tools,
-                tool_choice="required",  # 强制LLM必须使用工具
+                tool_choice="auto",  # 强制LLM必须使用工具
                 temperature=0.1  # 降低温度以提高确定性
             )
             
@@ -421,7 +409,7 @@ class WorkflowNodes:
             error_context = f"知识图谱查询出错: {str(e)}\n这可能是因为：\n1. 知识图谱中没有相关信息\n2. 实体名称拼写不同\n3. 该实体尚未被记录到知识图谱中\n建议：可以询问用户的具体喜好，然后记录下来。"
             
             # 将错误信息添加到提示词中
-            self.prompt_builder.kg_tmpl(error_context)
+            self.prompt_builder.kg_tmpl = error_context
         
         return {"kg_context": kg_context_str}
 
