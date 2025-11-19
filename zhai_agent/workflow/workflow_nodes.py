@@ -12,6 +12,7 @@ from langchain.schema import Document
 from zhai_agent.prompt.mirix_memory_prompt import build_mirix_memory_prompt
 from zhai_agent.kg.kg_tools import get_kg_tools
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from zhai_agent.memory.MCPContextManager import get_mcp_context
 
 class WorkflowNodes:
     """
@@ -43,79 +44,61 @@ class WorkflowNodes:
 
     def llm_kg_node(self, state: ChatState) -> Dict[str, Any]:
         """
-        智能聊天节点：LLM 决策 -> (可选)调用 KG 工具 -> 生成回复
+        【修改版】知识图谱构建节点
+        职责：仅负责从用户对话中提取知识并存入图谱（写操作）。
+        特点：不生成回复，不阻塞对话流，静默运行。
         """
         try:
             # 1. 获取用户输入
             user_message = state.messages[-1].content if state.messages else ""
             
-            # 2. 获取记忆上下文
-            memory_context = self._get_memory_context(state)
-            
-            # 3. 构建 Prompt 
-            system_prompt = self._build_intelligent_system_prompt(memory_context)
+            # 2. 构建专门的知识提取 Prompt
+            # 强制 LLM 只关注提取信息，不要通过 content 说话
+            system_prompt = """你是一个知识图谱构建专家，负责从用户对话中提取实体和关系。
+你的唯一任务是调用工具将信息存入知识图谱。
+
+请分析用户的输入，如果包含有价值的事实、实体或关系（如用户的喜好、人际关系、职业信息等）：
+1. 请务必调用相关工具（如 kg_create_entity, kg_create_relationship 等）进行存储。
+2. 如果没有有价值的信息，不需要调用任何工具。
+
+重要：
+- 不要生成任何对话回复！
+- 不要试图回答用户的问题！
+- 只关注信息提取！"""
             
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ]
             
-            # 4. 第一轮 LLM 调用：决策与工具调用
-            # 使用预处理好的 self.openai_tools
+            # 3. 调用 LLM (仅一轮，用于触发工具)
             llm_response = self.rag_manager.llm_client.create_chat_completion(
                 messages=messages,
                 tools=self.openai_tools,
-                tool_choice="auto",
-                temperature=0.3
+                tool_choice="auto", # 让 LLM 决定是否需要提取
+                temperature=0.1     # 低温度，确保准确
             )
             
-            # 5. 处理工具调用 (ReAct 循环的第一步)
+            # 4. 处理工具调用
             tool_calls = llm_response.get("tool_calls")
             if tool_calls:
-                print(f"🤖 LLM 决定调用 {len(tool_calls)} 个工具")
+                print(f"🏗️ [KG Build] 正在提取知识，调用 {len(tool_calls)} 个工具...")
                 
-                # 将助手的思考过程加入历史
-                messages.append({
-                    "role": "assistant",
-                    "content": llm_response.get("content") or "",  # content 可能为 None
-                    "tool_calls": tool_calls
-                })
-                
-                # 执行所有工具
+                # 执行所有工具 (存入 Neo4j)
                 tool_results = self._execute_tool_calls(tool_calls, self.kg_tools)
                 
-                # 将工具结果加入历史
-                for tool_result in tool_results:
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_result["call_id"],
-                        "content": str(tool_result["result"]) # 确保转换为字符串
-                    })
-                
-                # 6. 第二轮 LLM 调用：根据工具结果生成最终回复
-                final_response = self.rag_manager.llm_client.create_chat_completion(
-                    messages=messages,
-                    # 第二轮通常不需要再调用工具，除非实现多轮循环
-                    tools=self.openai_tools, 
-                    tool_choice="none", 
-                    temperature=0.3
-                )
-                ai_response = final_response["content"]
+                # 记录日志即可，不需要将结果写回 state.messages 干扰聊天历史
+                for res in tool_results:
+                    print(f"  - 工具执行结果: {res['result']}")
             else:
-                # 未调用工具，直接使用回复
-                ai_response = llm_response["content"]
-            
-            # 7. 更新状态
-            # 注意：这里应该将 AI 回复加入 state.messages，而不仅仅是返回
-            from langchain_core.messages import AIMessage
-            state.messages.append(AIMessage(content=ai_response))
+                print("👀 [KG Build] 本轮对话无新知识需要提取。")
+                
+            # 注意：这里直接返回 state，不对 state.messages 做任何修改
+            # 这样它就像一个透明的过滤器
 
         except Exception as e:
-            print(f"❌ 智能聊天节点出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            # 错误恢复机制
-            state.messages.append(AIMessage(content="抱歉，系统处理您的请求时遇到了一些技术问题。"))
+            print(f"❌ 知识图谱构建节点出错: {str(e)}")
+            # 出错也不影响主流程
             
         return state.model_dump()
         

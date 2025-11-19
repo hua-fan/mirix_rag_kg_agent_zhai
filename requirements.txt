@@ -9,3 +9,4 @@ transformers
 sentence-transformers
 wxauto
 psycopg2-binary>=2.9.9
+neo4j>=5.0.0

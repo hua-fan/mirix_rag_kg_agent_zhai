@@ -5,6 +5,7 @@ from langchain_core.documents import Document
 from zhai_agent.llm.llm_client import get_llm_client
 from zhai_agent.rag.document_reranker import get_document_reranker
 from config import settings
+from zhai_agent.prompt.prompt_builder import PromptBuilder
 
 
 class RAGManager:
@@ -21,6 +22,7 @@ class RAGManager:
         # 初始化各个组件
         self.llm_client = get_llm_client()
         self.document_reranker = get_document_reranker()
+        self.prompt_builder = PromptBuilder()
     
     def retrieve_documents(self, retriever, query):
         """
