@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Any
 from kg_tools_prompt import _build_intelligent_system_prompt
+from kg_search_prompt import _build_kg_search_prompt
 
 class PromptBuilder:
     """
@@ -68,6 +69,15 @@ class PromptBuilder:
     
     def get_kg_tools_prompt(self, memory_context: str) -> str:
         """
-        获取知识图谱工具提示
+        获取知识图谱构建工具提示词
         """
         return _build_intelligent_system_prompt(memory_context)
+
+
+    def get_kg_search_prompt(self, memory_context: str) -> str:
+        """
+        获取知识图谱查询工具提示词
+        """
+        return _build_kg_search_prompt(memory_context)
+       
+        

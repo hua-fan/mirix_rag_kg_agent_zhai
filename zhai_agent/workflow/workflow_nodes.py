@@ -38,8 +38,20 @@ class WorkflowNodes:
         self.kg_manager = KGManager()
         # 优化1: 预加载并缓存工具
         self.kg_tools = get_kg_tools()
-        # 优化2: 使用 LangChain 标准函数转换工具格式
-        self.openai_tools = [convert_to_openai_tool(t) for t in self.kg_tools]
+    
+        # 预先筛选查询类工具
+        self.search_tools = [
+            t for t in self.kg_tools 
+            if t.name in ['kg_search_entities', 'kg_get_entity', 'kg_get_graph_stats']
+        ]
+        self.openai_search_tools = [convert_to_openai_tool(t) for t in self.search_tools]
+        
+        # 预先筛选构建类工具 (给 llm_kg_node 用)
+        self.build_tools = [
+            t for t in self.kg_tools 
+            if t.name in ['kg_create_entity', 'kg_create_relationship'] # 根据实际工具名调整
+        ]
+        self.openai_build_tools = [convert_to_openai_tool(t) for t in self.build_tools]
 
 
     def llm_kg_node(self, state: ChatState) -> Dict[str, Any]:
@@ -54,17 +66,7 @@ class WorkflowNodes:
             
             # 2. 构建专门的知识提取 Prompt
             # 强制 LLM 只关注提取信息，不要通过 content 说话
-            system_prompt = """你是一个知识图谱构建专家，负责从用户对话中提取实体和关系。
-你的唯一任务是调用工具将信息存入知识图谱。
-
-请分析用户的输入，如果包含有价值的事实、实体或关系（如用户的喜好、人际关系、职业信息等）：
-1. 请务必调用相关工具（如 kg_create_entity, kg_create_relationship 等）进行存储。
-2. 如果没有有价值的信息，不需要调用任何工具。
-
-重要：
-- 不要生成任何对话回复！
-- 不要试图回答用户的问题！
-- 只关注信息提取！"""
+            system_prompt = PromptBuilder.get_kg_tools_prompt(state.memory_context)
             
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -74,9 +76,8 @@ class WorkflowNodes:
             # 3. 调用 LLM (仅一轮，用于触发工具)
             llm_response = self.rag_manager.llm_client.create_chat_completion(
                 messages=messages,
-                tools=self.openai_tools,
+                tools=self.openai_build_tools,
                 tool_choice="auto", # 让 LLM 决定是否需要提取
-                temperature=0.1     # 低温度，确保准确
             )
             
             # 4. 处理工具调用
@@ -100,7 +101,7 @@ class WorkflowNodes:
             print(f"❌ 知识图谱构建节点出错: {str(e)}")
             # 出错也不影响主流程
             
-        return state.model_dump()
+        return {}
         
     def chat_node(self, state: ChatState) -> Dict[str, Any]:
         """
@@ -163,11 +164,6 @@ class WorkflowNodes:
         
         return "暂无相关记忆信息"
     
-    def _build_intelligent_system_prompt(self, memory_context: str) -> str:
-        """
-        构建工具调用提示，传入记忆上下文进行辅助。
-        """
-        return self.prompt_builder.get_kg_tools_prompt(memory_context)
     
     
     def _execute_tool_calls(self, tool_calls, available_tools) -> List[Dict[str, Any]]:
@@ -250,7 +246,7 @@ class WorkflowNodes:
         # 而是更新 state
         state.rag_context = rag_context_str
 
-        return state.model_dump()
+        return {"rag_context": rag_context_str}
 
 
     def mirix_memory_node(self, state:ChatState) -> Dict[str, Any]:
@@ -291,41 +287,14 @@ class WorkflowNodes:
                 user_message = ""
             
             # 构建详细的系统提示，明确指导LLM使用工具
-            system_prompt = f"""你是一个知识图谱查询专家。你必须使用提供的工具来查询知识图谱，不能凭想象回答。
-
-可用工具包括：
-- kg_search_entities(keyword): 搜索包含关键词的实体（如人名、物品、概念等）
-- kg_get_entity(entity_name): 获取实体的详细信息（属性、关系等）
-- kg_get_graph_stats(): 获取知识图谱的整体统计信息
-
-重要规则：
-1. 对于用户关于个人喜好、属性、关系的问题，你必须先搜索相关实体
-2. 如果找到实体，立即使用get_entity获取其详细信息
-3. 使用工具获取真实数据，不能凭想象或假设回答
-4. 如果搜索不到相关信息，要如实说明"在知识图谱中未找到相关信息"
-5. 记住用户的名字和个人信息很重要，每次对话都要检查知识图谱
-
-请严格按以下步骤操作：
-1. 提取用户问题中的关键实体名称（如人名"繁花"）
-2. 首先使用kg_search_entities搜索该实体（不指定实体类型）
-3. 如果找不到，可以尝试指定常见类型如'person'再次搜索
-4. 如果找到匹配实体，使用kg_get_entity获取其完整信息
-5. 基于工具返回的真实数据回答用户问题
-
-记忆信息（供参考）：
-{self._get_memory_context(state)}
-
-请根据用户的问题，智能地选择查询工具并执行查询。记住：必须使用工具获取真实数据！"""
+            system_prompt = PromptBuilder.get_kg_search_prompt(state.memory_context)
             
-            # 准备消息列表
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message}
-            ]
-            
-            # 获取知识图谱工具，但只保留查询工具
-            from zhai_agent.kg.kg_tools import get_kg_tools
-            all_tools = get_kg_tools()
+            llm_response = self.rag_manager.llm_client.create_chat_completion(
+                messages=[{"role": "system", "content": system_prompt}, ...],
+                tools=self.openai_search_tools, # 直接使用
+                tool_choice="auto",
+                temperature=0.1
+            )
             
             print(f"获取到 {len(all_tools)} 个工具")
             
@@ -452,9 +421,9 @@ class WorkflowNodes:
             error_context = f"知识图谱查询出错: {str(e)}\n这可能是因为：\n1. 知识图谱中没有相关信息\n2. 实体名称拼写不同\n3. 该实体尚未被记录到知识图谱中\n建议：可以询问用户的具体喜好，然后记录下来。"
             
             # 将错误信息添加到提示词中
-            self.prompt_builder.build_kg_prompt(error_context)
+            self.prompt_builder.kg_tmpl(error_context)
         
-        return state.model_dump()
+        return {"kg_context": kg_context_str}
 
     def normal_memory_node(self, state: ChatState) -> Dict[str, Any]:
         """
