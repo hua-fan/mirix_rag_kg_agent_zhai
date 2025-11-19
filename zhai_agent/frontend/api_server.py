@@ -7,6 +7,9 @@ import sys
 import os
 import uuid
 from fastapi import Header,Depends,HTTPException
+import json
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage
 
 
 SESSIONS = {}
@@ -118,8 +121,8 @@ async def get_current_user(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Token 无效或已过期")
     return user_data
 
-# 聊天端点
-@app.post("/api/chat", response_model=ChatResponse)
+# 聊天端点（流式输出版）
+@app.post("/api/chat")
 async def chat(
     request: ChatRequest,
     user_data: dict = Depends(get_current_user)
@@ -127,49 +130,63 @@ async def chat(
     try:
         user_name = user_data["user_name"]
         user_id = user_data["user_id"]
-        # 验证输入
+        
         if not request.message or not request.message.strip():
             raise HTTPException(status_code=400, detail="消息内容不能为空")
-        
-        # 记录用户聊天信息（这里只是打印，实际可以存储到数据库）
-        print(f"用户聊天: 用户名={request.user_name}, 会话ID={request.session_id}, 消息长度={len(request.message)}字符")
-        
-        # 调用现有的workflow_manager处理用户请求
-        result = workflow_manager.process_user_request(
-            user_message=request.message,
-            user_name=user_name,
-            session_id=user_id # 使用 user_id 作为 session_id
-        )
-        
-        # 提取响应文本 - 处理可能的字典格式
-        response_text = ""
-        if isinstance(result, dict):
-            # 如果是字典，尝试从messages中提取文本
-            if 'messages' in result and isinstance(result['messages'], list) and result['messages']:
-                response_text = result['messages'][-1].get('content', '')
-            else:
-                response_text = str(result)
-        else:
-            # 直接使用结果作为响应文本
-            response_text = str(result)
-        
-        # 构建响应
-        response = ChatResponse(
-            response=response_text,
-            success=True,
-            user_name=request.user_name
-        )
-        
-        return response
+            
+        print(f"用户聊天: 用户名={user_name}, 消息={request.message[:20]}...")
+
+        # 定义流式生成器
+        async def event_stream():
+            # 1. 确保工作流已初始化
+            if workflow_manager.app is None:
+                workflow_manager.create_workflow()
+
+            # 2. 构建输入
+            inputs = {
+                "messages": [HumanMessage(content=request.message)],
+                "user_name": user_name,
+                "session_id": user_id,
+                "query": request.message
+            }
+
+            # 3. 异步监听工作流事件 (使用 astream)
+            # stream_mode="updates" 意味着每当一个节点跑完，我们就会收到通知
+            async for event in workflow_manager.app.astream(inputs, stream_mode="updates"):
+                
+                # 情况 A: 聊天节点完成 (generate_answer) -> 立即推送给前端
+                if "generate_answer" in event:
+                    # 获取 AI 回复内容
+                    # 注意：这里的数据结构取决于你的 workflow_nodes 返回值
+                    # 假设返回的是 {"messages": [AIMessage(...)]}
+                    ai_msg = event["generate_answer"]["messages"][-1]
+                    content = ai_msg.content if hasattr(ai_msg, 'content') else str(ai_msg)
+                    
+                    # 构建数据包，使用 JSON 格式，末尾加换行符分隔
+                    data = json.dumps({
+                        "type": "answer",
+                        "response": content,
+                        "success": True
+                    }, ensure_ascii=False)
+                    yield f"{data}\n"
+                
+                # 情况 B: (可选) 只是为了调试，你可以推送后台状态
+                # 前端可以选择忽略这些类型的信息
+                if "kg_build" in event:
+                    print(f"后台任务：知识图谱构建完成")
+                
+                if "save_memory" in event:
+                    print(f"后台任务：记忆保存完成")
+
+        # 返回流式响应，媒体类型设为 x-ndjson (Newline Delimited JSON)
+        return StreamingResponse(event_stream(), media_type="application/x-ndjson")
         
     except Exception as e:
-        # 记录错误
-        print(f"处理聊天请求时出错: {str(e)}")
-        # 返回错误响应
-        return ChatResponse(
-            response=f"抱歉，处理您的请求时出现错误: {str(e)}",
-            success=False,
-            user_name=request.user_name
+        print(f"API 错误: {e}")
+        # 流式错误处理比较特殊，这里简单返回一个包含错误的 JSON
+        return StreamingResponse(
+            iter([json.dumps({"type": "error", "response": str(e)}, ensure_ascii=False) + "\n"]),
+            media_type="application/x-ndjson"
         )
 
 # 配置静态文件服务

@@ -285,6 +285,7 @@ function checkSavedLogin() {
 }
 
 // 实际API调用函数
+// 修改 callChatAPI 函数以支持流式读取
 async function callChatAPI(message) {
     const token = localStorage.getItem('authToken');
     if (!token) {
@@ -292,28 +293,62 @@ async function callChatAPI(message) {
         handleLogout();
         return;
     }
+
     try {
         const response = await fetch('http://localhost:8000/api/chat', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}` // 添加认证头
+                'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify({
-                message: message
-                // 不再需要发送 user_name 等，后端会从 token 解析
-            })
+            body: JSON.stringify({ message: message })
         });
-        
+
         if (!response.ok) {
             throw new Error('API请求失败');
         }
+
+        // === 核心修改：读取流 ===
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let finalResponse = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // 解码二进制数据块
+            const chunk = decoder.decode(value, { stream: true });
+            
+            // 处理可能的多行数据 (NDJSON)
+            const lines = chunk.split('\n').filter(line => line.trim() !== '');
+            
+            for (const line of lines) {
+                try {
+                    const data = JSON.parse(line);
+                    
+                    // 如果收到的是答案类型
+                    if (data.type === 'answer') {
+                        finalResponse = data.response;
+                        // 这里我们直接返回结果，让外层的 sendMessage 函数去显示
+                        // 注意：如果你想实现打字机效果的"流式逐字显示"，逻辑会稍微不同
+                        // 但目前的逻辑是：一旦生成完整回复，立即显示，无需等待后续后台任务
+                        return finalResponse; 
+                    }
+                    
+                    if (data.type === 'error') {
+                        throw new Error(data.response);
+                    }
+                } catch (e) {
+                    console.error("解析流数据出错:", e);
+                }
+            }
+        }
         
-        const data = await response.json();
-        return data.response;
+        return finalResponse || "未收到有效回复";
+
     } catch (error) {
-        console.error('API调用错误，使用模拟回复:', error);
-        // API调用失败时使用模拟回复作为备用
+        console.error('API调用错误:', error);
         return generateMockResponse(message);
     }
 }

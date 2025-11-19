@@ -1,5 +1,4 @@
 import json
-from pickle import DICT
 from typing import Dict, Any, List
 from zhai_agent.models.chat_state import ChatState
 from zhai_agent.rag.rag_manager import RAGManager
@@ -276,9 +275,13 @@ class WorkflowNodes:
             
             # 构建详细的系统提示，明确指导LLM使用工具
             system_prompt = PromptBuilder.get_kg_search_prompt(state.memory_context)
-            
+                
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ]
             llm_response = self.rag_manager.llm_client.create_chat_completion(
-                messages=[{"role": "system", "content": system_prompt}, ...],
+                messages=messages,
                 tools=self.openai_search_tools, # 直接使用
                 tool_choice="auto",
                 temperature=0.1
@@ -287,7 +290,7 @@ class WorkflowNodes:
             print(f"获取到 {len(self.openai_search_tools)} 个工具")
             
             # 详细检查每个工具
-            for i, tool in enumerate(all_tools):
+            for i, tool in enumerate(self.kg_tools):
                 tool_name = getattr(tool, 'name', f'unknown_{i}')
                 tool_type = type(tool)
                 print(f"工具 {i}: name='{tool_name}', type={tool_type}")
@@ -302,7 +305,7 @@ class WorkflowNodes:
             
             # 过滤出仅查询工具并记录
             query_tools = []
-            for tool in all_tools:
+            for tool in self.kg_tools:
                 if hasattr(tool, 'name') and tool.name in ['kg_search_entities', 'kg_get_entity', 'kg_get_graph_stats']:
                     query_tools.append(tool)
 
@@ -311,7 +314,7 @@ class WorkflowNodes:
             # 如果没有找到工具，尝试使用所有工具
             if not query_tools:
                 print("⚠️  未找到指定的查询工具，尝试使用所有工具...")
-                query_tools = all_tools
+                query_tools = self.kg_tools
                 print(f"使用所有工具: {[getattr(tool, 'name', 'unknown') for tool in query_tools]}")
                 
                 # 如果仍然没有工具，创建模拟工具
