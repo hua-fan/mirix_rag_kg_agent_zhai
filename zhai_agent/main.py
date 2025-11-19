@@ -10,7 +10,7 @@ from zhai_agent.workflow.workflow_manager import WorkflowManager
 from zhai_agent.ui.user_interface import UserInterface
 
 # 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 

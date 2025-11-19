@@ -28,7 +28,7 @@ class LLMClient:
         if not self.api_key:
             logger.warning("未检测到 DEEPSEEK_API_KEY，LLM 功能可能不可用。")
     
-    def call_model(self, prompt, temperature=0.8, max_tokens=2000):
+    def call_model(self, prompt, temperature=0.9, max_tokens=2000):
         """
         调用语言模型
         Args:
@@ -62,7 +62,7 @@ class LLMClient:
             logger.error(error_message)
             return error_message
     
-    def create_chat_completion(self, messages, temperature=0.8, max_tokens=2000, tools=None, tool_choice=None):
+    def create_chat_completion(self, messages, temperature=0.9, max_tokens=2000, tools=None, tool_choice=None):
         """
         创建聊天完成，支持工具调用
         Args:

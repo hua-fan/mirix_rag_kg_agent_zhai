@@ -38,9 +38,19 @@ class WorkflowNodes:
         # 优先使用传入的mirix_agent参数，如果没有传入才创建默认实例
         self.mirix_agent = mirix_agent or MirixMemoryAgent()
         # 初始化知识图谱管理器
-        self.kg_manager = KGManager()
+        try:
+            self.kg_manager = KGManager()
+            logger.info("✅ 知识图谱管理器初始化成功")
+        except Exception as e:
+            logger.error(f"❌ 知识图谱管理器初始化失败: {str(e)}")
+            # 创建一个空的KGManager实例，避免程序崩溃
+            self.kg_manager = None
         # 优化1: 预加载并缓存工具
-        self.kg_tools = get_kg_tools()
+        if self.kg_manager:
+            self.kg_tools = get_kg_tools()
+        else:
+            self.kg_tools = []
+            logger.warning("⚠️ 知识图谱工具初始化跳过，KGManager不可用")
     
         # 预先筛选查询类工具
         self.search_tools = [
@@ -95,7 +105,7 @@ class WorkflowNodes:
                 for res in tool_results:
                     logger.debug(f"工具执行结果: {res['result']}")
             else:
-                logger.debug("[KG Build] 本轮对话无新知识需要提取")
+                logger.info("[KG Build] 本轮对话无新知识需要提取")
                 
             # 注意：这里直接返回 state，不对 state.messages 做任何修改
             # 这样它就像一个透明的过滤器

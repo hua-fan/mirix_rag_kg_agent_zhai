@@ -173,10 +173,10 @@ async def chat(
                 # 情况 B: (可选) 只是为了调试，你可以推送后台状态
                 # 前端可以选择忽略这些类型的信息
                 if "kg_build" in event:
-                    logger.debug(f"后台任务：知识图谱构建完成")
+                    logger.info(f"后台任务：知识图谱构建完成")
                 
                 if "save_memory" in event:
-                    logger.debug(f"后台任务：记忆保存完成")
+                    logger.info(f"后台任务：记忆保存完成")
 
         # 返回流式响应，媒体类型设为 x-ndjson (Newline Delimited JSON)
         return StreamingResponse(event_stream(), media_type="application/x-ndjson")
