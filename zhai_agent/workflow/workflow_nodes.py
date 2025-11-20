@@ -55,14 +55,14 @@ class WorkflowNodes:
         # 预先筛选查询类工具
         self.search_tools = [
             t for t in self.kg_tools 
-            if t.name in ['kg_search_entities', 'kg_get_entity', 'kg_get_graph_stats']
+            if t.name in ['kg_search_entities', 'kg_get_entity', 'kg_get_graph_stats','kg_get_relationships']
         ]
         self.openai_search_tools = [convert_to_openai_tool(t) for t in self.search_tools]
         
         # 预先筛选构建类工具 (给 llm_kg_node 用)
         self.build_tools = [
             t for t in self.kg_tools 
-            if t.name in ['kg_create_entity', 'kg_create_relationship'] # 根据实际工具名调整
+            if t.name in ['kg_create_entity', 'kg_create_relationship','kg_create_knowledge_triple'] # 根据实际工具名调整
         ]
         self.openai_build_tools = [convert_to_openai_tool(t) for t in self.build_tools]
 
@@ -103,7 +103,7 @@ class WorkflowNodes:
                 
                 # 记录日志即可，不需要将结果写回 state.messages 干扰聊天历史
                 for res in tool_results:
-                    logger.debug(f"工具执行结果: {res['result']}")
+                    logger.info(f"工具执行结果: {res['result']}")
             else:
                 logger.info("[KG Build] 本轮对话无新知识需要提取")
                 
@@ -134,18 +134,15 @@ class WorkflowNodes:
             ai_response = self._generate_response(user_message, state)
             # 创建AI消息并添加到状态
             ai_message = AIMessage(content=ai_response)
-            state.messages.append(ai_message)
-            
-            logger.debug(f"纯聊天回复: {ai_response[:100]}...")
+            logger.info(f"纯聊天回复: {ai_response[:100]}...")
             
         except Exception as e:
             logger.error(f"聊天节点出错: {str(e)}")
             # 添加错误回复
             error_response = "抱歉，我在处理您的消息时遇到了问题。请稍后再试。"
             ai_message = AIMessage(content=error_response)
-            state.messages.append(ai_message)
-        
-        return state.model_dump()
+
+        return {"messages": [ai_message]}
     
     def _get_memory_context(self, state: ChatState) -> str:
         """
@@ -292,7 +289,7 @@ class WorkflowNodes:
                 user_message = ""
             
             # 构建系统提示
-            system_prompt = self.prompt_builder.get_kg_search_prompt(state.memory_context)
+            system_prompt = self.prompt_builder.get_kg_search_prompt(state.user_name,user_message)
                 
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -368,7 +365,7 @@ class WorkflowNodes:
         
         # 从上下文管理器获取记忆（包括短期和长期记忆）
         previous_messages = context_manager.get_context(include_long_memory=True, limit=10)
-        logger.debug(f"从MCPContextManager加载的消息数量: {len(previous_messages)}")
+        logger.info(f"从MCPContextManager加载的消息数量: {len(previous_messages)}")
         
         # 格式化对话历史
         conversation_history = self._format_conversation_history(previous_messages)
@@ -391,9 +388,9 @@ class WorkflowNodes:
         if self.retriever:
             # 检索相关文档
             retrieved_docs = self.rag_manager.retrieve_documents(self.retriever, user_message)
-            logger.debug(f"已检索到 {len(retrieved_docs)} 个相关文档片段")
+            logger.info(f"已检索到 {len(retrieved_docs)} 个相关文档片段")
         else:
-            logger.debug("未使用RAG增强，无文档检索步骤")
+            logger.info("未使用RAG增强，无文档检索步骤")
         return retrieved_docs
     
 
@@ -427,9 +424,9 @@ class WorkflowNodes:
             # 移除最后一个换行符
             if conversation_history:
                 conversation_history = conversation_history.rstrip('\n')
-            logger.debug("已添加对话历史到提示中")
+            logger.info("已添加对话历史到提示中")
         else:
-            logger.debug("无对话历史")
+            logger.info("无对话历史")
         return conversation_history
 
 
@@ -445,7 +442,7 @@ class WorkflowNodes:
             kg_context=state.kg_context
         )
         
-        logger.debug(f"生成的最终提示:\n{final_prompt}")
+        logger.info(f"生成的最终提示:\n{final_prompt}")
         return self.rag_manager.call_llm(final_prompt)
     
     def store_mirix_memory_node(self, state: ChatState) -> Dict[str, Any]:
@@ -515,7 +512,7 @@ class WorkflowNodes:
         )
         
         user_id = context_manager.user_id
-        logger.debug(f"对话内容已通过MCPContextManager保存到用户: {user_id}")
+        logger.info(f"对话内容已通过MCPContextManager保存到用户: {user_id}")
     
 
   

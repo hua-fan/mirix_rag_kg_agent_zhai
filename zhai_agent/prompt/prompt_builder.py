@@ -75,11 +75,11 @@ class PromptBuilder:
         return _build_intelligent_system_prompt(memory_context)
 
 
-    def get_kg_search_prompt(self, memory_context: str) -> str:
+    def get_kg_search_prompt(self, user_name:str,query: str) -> str:
         """
         获取知识图谱查询工具提示词
         """
-        return _build_kg_search_prompt(memory_context)
+        return _build_kg_search_prompt(user_name=user_name,query=query)
 
 
 def get_prompt_builder() -> PromptBuilder:

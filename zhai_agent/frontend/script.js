@@ -288,6 +288,10 @@ function checkSavedLogin() {
 // 修改 callChatAPI 函数以支持流式读取
 async function callChatAPI(message) {
     const token = localStorage.getItem('authToken');
+
+    // [调试] 打印前端获取到的 Token
+    console.log("正在发送消息，当前 Token:", token);
+
     if (!token) {
         alert('请先登录');
         handleLogout();
@@ -295,6 +299,8 @@ async function callChatAPI(message) {
     }
 
     try {
+         console.log("发起 API 请求..."); 
+
         const response = await fetch('http://localhost:8000/api/chat', {
             method: 'POST',
             headers: {
@@ -303,6 +309,16 @@ async function callChatAPI(message) {
             },
             body: JSON.stringify({ message: message })
         });
+
+         // [调试] 打印响应状态
+        console.log("API 响应状态:", response.status);
+
+        if (response.status === 401) {
+            console.error("认证失败！Token 可能已过期或无效");
+            alert('登录已过期，请重新登录');
+            handleLogout();
+            return "登录已过期";
+        }
 
         if (!response.ok) {
             throw new Error('API请求失败');

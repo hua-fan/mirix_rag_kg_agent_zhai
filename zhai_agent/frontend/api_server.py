@@ -10,7 +10,11 @@ from fastapi import Header,Depends,HTTPException
 import json
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage
+import logging
 
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 SESSIONS = {}
 # 添加项目根目录到Python路径
@@ -40,6 +44,8 @@ app.add_middleware(
 )
 
 # 创建WorkflowManager实例
+# 注意：为了避免启动过慢，建议延迟初始化或使用单例模式
+# 这里暂时保持原样，但在生产环境建议优化
 workflow_manager = WorkflowManager()
 
 # 定义请求和响应模型
@@ -95,6 +101,8 @@ async def login(request: LoginRequest):
             "user_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, request.username))
         }
         
+        logger.info(f"Session已创建: token={token}, user={request.username}") # [调试] 打印创建的 Token
+
         return LoginResponse(
             success=True,
             user_name=request.username,
@@ -112,13 +120,23 @@ async def login(request: LoginRequest):
 
 async def get_current_user(authorization: str = Header(None)):
     if not authorization:
+        logger.warning("请求头缺少 Authorization")
         raise HTTPException(status_code=401, detail="缺少认证 Token")
     
-    token = authorization.replace("Bearer ", "")
+    # 增强的 Token 解析
+    if authorization.startswith("Bearer "):
+        token = authorization.replace("Bearer ", "")
+    else:
+        token = authorization
+        
+    logger.info(f"验证 Token: {token}") # [调试] 打印接收到的 Token
+    
     user_data = SESSIONS.get(token)
     
     if not user_data:
+        logger.error(f"Token 无效或未找到。当前有效 Token 列表: {list(SESSIONS.keys())}") # [调试] 打印当前有效的 Token 列表
         raise HTTPException(status_code=401, detail="Token 无效或已过期")
+        
     return user_data
 
 # 聊天端点（流式输出版）
@@ -204,9 +222,12 @@ async def api_root():
 # 启动命令
 if __name__ == "__main__":
     import uvicorn
+    # 注意：在 Windows + uvicorn + reload 模式下，全局变量可能会被重置
+    # 因为 reload 会启动新的子进程
+    # 如果调试时发现 SESSION 总是丢失，尝试去掉 reload=True 
     uvicorn.run(
         "api_server:app",
         host="0.0.0.0",
         port=8000,
-        reload=True
+        reload=False # ⚠️ 暂时改为 False 试试，排除 reload 导致的多进程变量隔离问题
     )

@@ -60,7 +60,7 @@ class UserInterface:
             if message_type == "ai":
                 message_content = last_message.get('content') if isinstance(last_message, dict) else getattr(last_message, 'content', '')
                 print(f"\nAI: {message_content}")
-                logger.debug(f"显示AI响应: {message_content[:100]}...")
+                logger.info(f"显示AI响应: {message_content[:100]}...")
             
             # 如果使用了RAG功能，询问是否显示检索的文档
             if result and 'retrieved_documents' in result and result['retrieved_documents']:

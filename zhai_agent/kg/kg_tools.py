@@ -44,6 +44,12 @@ class EntityGetInput(BaseModel):
     name: str = Field(description="实体名称")
     entity_type: Optional[str] = Field(description="实体类型", default=None)
 
+class RelationshipGetInput(BaseModel):
+    """获取关系的输入参数"""
+    entity_name: str = Field(description="实体名称")
+    rel_type: Optional[str] = Field(description="关系类型过滤 (如 'LIKES', 'OWNS')", default=None)
+    limit: int = Field(description="返回限制", default=20)
+
 class BatchImportInput(BaseModel):
     """批量导入的输入参数"""
     triples: List[List[str]] = Field(description="三元组列表，每个三元组为[subject, predicate, object]")
@@ -228,6 +234,53 @@ def get_entity(name: str, entity_type: str = None) -> str:
         logger.error(f"获取实体信息工具出错: {str(e)}")
         return f"❌ 获取实体信息时发生错误: {str(e)}"
 
+# 获取关系工具 (新增)
+@tool("kg_get_relationships", args_schema=RelationshipGetInput, return_direct=False)
+def get_relationships(entity_name: str, rel_type: str = None, limit: int = 20) -> str:
+    """
+    获取某实体的连接关系。
+    
+    可以查询该实体“去向”哪里（out），或者“来自”哪里（in）。
+    默认返回所有方向的关系。
+    """
+    try:
+        with KGTools() as tools:
+            # 调用底层 manager 的方法
+            # 注意：这里假设底层方法签名兼容，我们统一转大写以防万一
+            safe_rel_type = rel_type.upper() if rel_type else None
+            
+            relationships = tools.kg_manager.get_relationships(
+                entity_name=entity_name, 
+                rel_type=safe_rel_type,
+                limit=limit
+            )
+            
+            if not relationships:
+                return f"🈳 未找到关于 '{entity_name}' 的{' ' + rel_type if rel_type else ''} 关系"
+            
+            result = f"🔗 '{entity_name}' 的关系列表 ({len(relationships)} 条):\n"
+            for rel in relationships:
+                # 解析关系数据 (根据底层 get_relationships 的返回结构)
+                # 假设返回结构包含: type, other_node (subject/object), properties
+                r_type = rel.get('type', 'UNKNOWN')
+                
+                # 判断方向：如果当前实体是 subject，则是 -> object
+                # 如果当前实体是 object，则是 <- subject
+                if rel.get('subject', {}).get('name') == entity_name:
+                    target = rel.get('object', {}).get('name', 'Unknown')
+                    arrow = f"- [{r_type}] -> {target}"
+                else:
+                    source = rel.get('subject', {}).get('name', 'Unknown')
+                    arrow = f"<- [{r_type}] - {source}"
+                
+                result += f"  {arrow}\n"
+                
+            return result.strip()
+            
+    except Exception as e:
+        logger.error(f"获取关系工具出错: {str(e)}")
+        return f"❌ 获取关系时发生错误: {str(e)}"
+
 # 批量导入三元组工具
 @tool("kg_batch_import_triples", args_schema=BatchImportInput, return_direct=False)
 def batch_import_triples(triples: List[List[str]], entity_type_map: Dict[str, str] = None) -> str:
@@ -324,6 +377,7 @@ def get_kg_tools() -> List:
         create_knowledge_triple,
         search_entities,
         get_entity,
+        get_relationships, 
         batch_import_triples,
         get_graph_stats
     ]
@@ -336,6 +390,7 @@ __all__ = [
     'create_knowledge_triple',
     'search_entities',
     'get_entity',
+    'get_relationships',
     'batch_import_triples',
     'get_graph_stats'
 ]

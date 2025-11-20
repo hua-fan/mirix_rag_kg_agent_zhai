@@ -13,7 +13,7 @@ KEEP_LAST_N_MEMORIES = 50  # 保留最近50轮对话的记忆
 
 class MirixMemoryAgent:
     def __init__(self, api_key: str = None, model: str = None):
-        logger.info(f"正在初始化Mirix实例...")
+        logger.info(f"正在初始化MirixMemoryAgent实例...")
         
         self.api_key = api_key or settings.MIRIX_API_KEY
         self.model = model or settings.MIRIX_MODEL_NAME
@@ -21,6 +21,17 @@ class MirixMemoryAgent:
         # 使用配置初始化
         self.mirix_agent = Mirix(api_key=self.api_key, model=self.model)
         logger.info(f"Mirix实例初始化完成")
+        # 1. 基础重置：将全局根日志级别设为 INFO
+        # 这样 neo4j, urllib3 等第三方库默认只会打印 INFO 及以上级别的日志
+        logging.basicConfig(
+            level=logging.INFO, 
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            force=True 
+        )
+
+        # 2. 针对您自己的项目，开启 DEBUG 级别
+        # 这样 zhai_agent 下的 logger.debug(...) 依然可以看到
+        logging.getLogger("zhai_agent").setLevel(logging.DEBUG)
 
 
     def add_memory(self, memory: str, user_name: Optional[str] = None) -> Dict[str, Any]:

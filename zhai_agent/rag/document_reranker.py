@@ -61,7 +61,7 @@ class DocumentReranker:
             logger.info(f"文档重排完成，共 {len(sorted_docs)} 个文档")
             if sorted_docs:
                 # 打印前几个文档的相关性分数（为了调试）
-                logger.debug(f"前 {min(3, len(sorted_docs))} 个最相关文档已排序")
+                logger.info(f"前 {min(3, len(sorted_docs))} 个最相关文档已排序")
             
             return sorted_docs
             

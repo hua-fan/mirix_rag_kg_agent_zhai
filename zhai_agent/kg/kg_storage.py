@@ -32,6 +32,19 @@ class KGStorage:
         except Exception as e:
             raise Exception(f"❌ 未知连接错误：{str(e)}")
 
+    # 添加到 KGStorage 类中（建议放在 __init__ 之后）
+    def _serialize_result(self, data):
+        """递归处理Neo4j返回的数据，将时间对象转换为字符串"""
+        if isinstance(data, list):
+            return [self._serialize_result(item) for item in data]
+        elif isinstance(data, dict):
+            return {k: self._serialize_result(v) for k, v in data.items()}
+        # 检查是否有 isoformat 方法 (涵盖 datetime, date, time, neo4j.time.DateTime)
+        elif hasattr(data, 'isoformat'):
+            return data.isoformat()
+        else:
+            return data
+
     def _validate_label(self, label: str) -> None:
         """验证标签/关系类型的合法性"""
         if not VALID_LABEL_PATTERN.match(label):
@@ -58,6 +71,7 @@ class KGStorage:
         """
         if not entity_name or not isinstance(entity_name, str):
             raise ValueError("实体名称不能为空且必须是字符串")
+        entity_type = entity_type.upper()
         self._validate_label(entity_type)
         
         metadata = metadata or {}
@@ -78,14 +92,11 @@ class KGStorage:
                 updated_at: e.updated_at
             }} AS entity
         """
+
         try:
             with self.driver.session() as session:
-                result = session.run(
-                    cypher, 
-                    name=entity_name, 
-                    metadata=metadata
-                ).single()
-                return result["entity"] if result else None
+                result = session.run(cypher, name=entity_name, metadata=metadata).single()
+                return self._serialize_result(result["entity"]) if result else None
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ 创建实体失败：{str(e)}")
 
@@ -116,6 +127,7 @@ class KGStorage:
                     logger.warning(f"⚠️ 跳过无效实体：{entity}（缺少name或type）")
                     continue
                 
+                entity_type = entity_type.upper()
                 result = self.create_entity(entity_name, entity_type, metadata)
                 results.append(result)
             except Exception as e:
@@ -147,6 +159,7 @@ class KGStorage:
         
         # 构建标签查询
         if entity_type:
+            entity_type = entity_type.upper()
             self._validate_label(entity_type)
             label_clause = f":{entity_type}"
         else:
@@ -160,8 +173,8 @@ class KGStorage:
                 name: e.name,
                 type: labels(e)[0],
                 metadata: properties(e),
-                created_at: e.created_at,
-                updated_at: e.updated_at
+                created_at: toString(e.created_at),  // 转换为字符串
+                updated_at: toString(e.updated_at)   // 转换为字符串
             }} AS entity
             LIMIT $limit
         """
@@ -169,7 +182,8 @@ class KGStorage:
         try:
             with self.driver.session() as session:
                 results = session.run(cypher, **params)
-                return [record["entity"] for record in results if record["entity"]]
+                data = [record["entity"] for record in results if record["entity"]]
+                return self._serialize_result(data)
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ 搜索实体失败：{str(e)}")
 
@@ -187,17 +201,19 @@ class KGStorage:
         if not entity_type:
             raise ValueError("实体类型不能为空")
         
+        entity_type = entity_type.upper()
         self._validate_label(entity_type)
         
         cypher = f"""
-            MATCH (e:{entity_type})
+            MATCH (e{label_clause})
+            WHERE toLower(e.name) CONTAINS toLower($keyword)
             RETURN e {{
                 id: id(e),
                 name: e.name,
-                type: '{entity_type}',
-                metadata: properties(e) ,
-                created_at: e.created_at,
-                updated_at: e.updated_at
+                type: labels(e)[0],
+                metadata: properties(e),
+                created_at: toString(e.created_at),  // 转换为字符串
+                updated_at: toString(e.updated_at)   // 转换为字符串
             }} AS entity
             LIMIT $limit
         """
@@ -205,7 +221,9 @@ class KGStorage:
         try:
             with self.driver.session() as session:
                 results = session.run(cypher, limit=limit)
-                return [record["entity"] for record in results if record["entity"]]
+                # ✅ 修改这里
+                data = [record["entity"] for record in results if record["entity"]]
+                return self._serialize_result(data)
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ 获取类型实体失败：{str(e)}")
 
@@ -218,15 +236,6 @@ class KGStorage:
     ) -> List[Dict]:
         """
         查询实体节点（支持多条件组合查询）
-        
-        Args:
-            entity_name: 实体名称（精确匹配）
-            entity_type: 实体类型（节点标签）
-            properties: 属性字典（键值对精确匹配）
-            limit: 返回结果上限
-        
-        Returns:
-            匹配的实体列表
         """
         properties = properties or {}
         where_clauses = []
@@ -247,11 +256,14 @@ class KGStorage:
         
         # 构建标签查询
         if entity_type:
+            entity_type = entity_type.upper()
             self._validate_label(entity_type)
             label_clause = f":{entity_type}"
         else:
             label_clause = ""
         
+        # 注意：这里的 Cypher 里的 toString 可以保留，也可以去掉，
+        # 因为下面加上 _serialize_result 后都能兼容。
         cypher = f"""
             MATCH (e{label_clause})
             {where_str}
@@ -259,8 +271,8 @@ class KGStorage:
                 id: id(e),
                 name: e.name,
                 type: labels(e)[0],
-                metadata: properties(e) ,
-                created_at: e.created_at,
+                metadata: properties(e),
+                created_at: e.created_at, 
                 updated_at: e.updated_at
             }} AS entity
             LIMIT $limit
@@ -270,8 +282,10 @@ class KGStorage:
         try:
             with self.driver.session() as session:
                 results = session.run(cypher, **params)
-                return [record["entity"] for record in results if record["entity"]]
-        except exceptions.Neo4jNeo4jError as e:
+                data = [record["entity"] for record in results if record["entity"]]
+                # ✅ 修复点 1: 加上序列化处理
+                return self._serialize_result(data)
+        except exceptions.Neo4jError as e:  # ✅ 修复点 2: 修正拼写错误 (原为 Neo4jNeo4jError)
             raise Exception(f"❌ 查询实体失败：{str(e)}")
 
     def update_entity(
@@ -295,6 +309,8 @@ class KGStorage:
         """
         if not entity_name or not entity_type:
             raise ValueError("实体名称和类型不能为空")
+            
+        entity_type = entity_type.upper()
         self._validate_label(entity_type)
         
         if not metadata:
@@ -313,19 +329,16 @@ class KGStorage:
                 id: id(e),
                 name: e.name,
                 type: '{entity_type}',
-                metadata: properties(e) ,
-                created_at: e.created_at,
-                updated_at: e.updated_at
+                metadata: properties(e),
+                created_at: toString(e.created_at),
+                updated_at: toString(e.updated_at)
             }} AS entity
         """
         try:
             with self.driver.session() as session:
-                result = session.run(
-                    cypher,
-                    name=entity_name,
-                    metadata=metadata
-                ).single()
-                return result["entity"] if result else None
+                result = session.run(cypher, name=entity_name, metadata=metadata).single()
+                # ✅ 修改这里
+                return self._serialize_result(result["entity"]) if result else None
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ 更新实体失败：{str(e)}")
 
@@ -348,6 +361,8 @@ class KGStorage:
         """
         if not entity_name or not entity_type:
             raise ValueError("实体名称和类型不能为空")
+            
+        entity_type = entity_type.upper()
         self._validate_label(entity_type)
         
         if delete_relationships:
@@ -404,7 +419,10 @@ class KGStorage:
                            (obj_type, "客体类型")]:
             if not param or not isinstance(param, str):
                 raise ValueError(f"{name}不能为空且必须是字符串")
-        
+            
+        subj_type = subj_type.upper()
+        obj_type = obj_type.upper()
+        rel_type = rel_type.upper()
         self._validate_label(subj_type)
         self._validate_label(obj_type)
         self._validate_label(rel_type)
@@ -423,7 +441,7 @@ class KGStorage:
                 type: type(r),
                 subject: {{name: s.name, type: '{subj_type}'}},
                 object: {{name: o.name, type: '{obj_type}'}},
-                metadata: properties(r) - {{created_at, updated_at}},
+                metadata: properties(r) ,
                 created_at: r.created_at,
                 updated_at: r.updated_at
             }} AS relationship
@@ -438,7 +456,8 @@ class KGStorage:
                 ).single()
                 if not result:
                     raise Exception(f"主体({subj_type}:{subj_name})或客体({obj_type}:{obj_name})不存在")
-                return result["relationship"]
+                # ✅ 修改这里
+                return self._serialize_result(result["relationship"])
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ 创建关系失败：{str(e)}")
 
@@ -467,12 +486,16 @@ class KGStorage:
                     logger.warning(f"⚠️ 跳过无效关系：{rel}（缺少必填字段）")
                     continue
                 
+                subj_type = rel["subj_type"].upper()
+                obj_type = rel["obj_type"].upper()
+                rel_type = rel["rel_type"].upper()
+
                 result = self.create_relationship(
                     subj_name=rel["subj_name"],
-                    subj_type=rel["subj_type"],
-                    rel_type=rel["rel_type"],
+                    subj_type=subj_type,
+                    rel_type=rel_type,
                     obj_name=rel["obj_name"],
-                    obj_type=rel["obj_type"],
+                    obj_type=obj_type,  
                     metadata=rel.get("metadata", {})
                 )
                 results.append(result)
@@ -527,6 +550,14 @@ class KGStorage:
         
         where_str = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         
+        # 转换为大写
+        if subj_type:
+            subj_type = subj_type.upper()
+        if obj_type:
+            obj_type = obj_type.upper()
+        if rel_type:
+            rel_type = rel_type.upper()
+
         # 构建标签和关系类型查询
         subj_label = f":{subj_type}" if subj_type and self._validate_label(subj_type) else ""
         obj_label = f":{obj_type}" if obj_type and self._validate_label(obj_type) else ""
@@ -548,9 +579,9 @@ class KGStorage:
                     name: o.name,
                     type: labels(o)[0]
                 }},
-                metadata: properties(r) - {{created_at, updated_at}},
+                metadata: properties(r) ,
                 created_at: r.created_at,
-                updated_at: r.updated_at
+                updated_at: r.updated_at                    
             }} AS relationship
             LIMIT $limit
         """
@@ -559,7 +590,8 @@ class KGStorage:
         try:
             with self.driver.session() as session:
                 results = session.run(cypher, **params)
-                return [record["relationship"] for record in results if record["relationship"]]
+                # ✅ 修改这里
+                return self._serialize_result([record["relationship"] for record in results if record["relationship"]])
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ 查询关系失败：{str(e)}")
 
@@ -591,6 +623,11 @@ class KGStorage:
         
         metadata = {k: v for k, v in metadata.items() if v is not None}
         
+        # 转换为大写
+        subj_type = subj_type.upper()
+        rel_type = rel_type.upper()
+        obj_type = obj_type.upper()
+        
         cypher = f"""
             MATCH (s:{subj_type} {{name: $subj_name}})-[r:{rel_type}]->(o:{obj_type} {{name: $obj_name}})
             SET r += $metadata, r.updated_at = datetime()
@@ -599,7 +636,7 @@ class KGStorage:
                 type: type(r),
                 subject: {{name: s.name, type: '{subj_type}'}},
                 object: {{name: o.name, type: '{obj_type}'}},
-                metadata: properties(r) - {{created_at, updated_at}},
+                metadata: properties(r) ,
                 created_at: r.created_at,
                 updated_at: r.updated_at
             }} AS relationship
@@ -614,7 +651,8 @@ class KGStorage:
                 ).single()
                 if not result:
                     raise Exception(f"关系({subj_type}:{subj_name})-[{rel_type}]->({obj_type}:{obj_name})不存在")
-                return result["relationship"]
+                # ✅ 修改这里
+                return self._serialize_result(result["relationship"])
         except exceptions.Neo4jError as e:
             raise Exception(f"❌ 更新关系失败：{str(e)}")
 
@@ -639,6 +677,11 @@ class KGStorage:
         Returns:
             删除成功返回True，失败返回False
         """
+        # 转换为大写
+        subj_type = subj_type.upper()
+        rel_type = rel_type.upper()
+        obj_type = obj_type.upper()
+        
         cypher = f"""
             MATCH (s:{subj_type} {{name: $subj_name}})-[r:{rel_type}]->(o:{obj_type} {{name: $obj_name}})
             DELETE r
@@ -677,7 +720,8 @@ class KGStorage:
         try:
             with self.driver.session() as session:
                 result = session.run(cypher, **params)
-                return [record.data() for record in result]
+                data = [record.data() for record in result]
+                return self._serialize_result(data)
         except exceptions.Neo4jError as e:
             logger.error(f"⚠️ Cypher执行失败：{str(e)}，Cypher语句：{cypher}，参数：{params}")
             return []
