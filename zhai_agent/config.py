@@ -24,14 +24,14 @@ class Config:
     NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "huafan123") # 建议修改默认密码
 
     # --- PostgreSQL 长期记忆配置 ---
-    PG_HOST = os.getenv("PG_HOST", "localhost")
+    PG_HOST = os.getenv("PG_HOST", "postgre")
     PG_PORT = int(os.getenv("PG_PORT", 5432))
     PG_DATABASE = os.getenv("PG_DATABASE", "zhai_agent")
     PG_USER = os.getenv("PG_USER", "postgres")
     PG_PASSWORD = os.getenv("PG_PASSWORD", "huafan123") # 建议修改默认密码
 
     # --- Redis 短期记忆配置 ---
-    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+    REDIS_HOST = os.getenv("REDIS_HOST", "redis")
     REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
     REDIS_DB = int(os.getenv("REDIS_DB", 0))
     REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
