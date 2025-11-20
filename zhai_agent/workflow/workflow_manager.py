@@ -10,7 +10,7 @@ from zhai_agent.models.chat_state import ChatState
 from zhai_agent.rag.rag_manager import RAGManager
 from zhai_agent.workflow.workflow_nodes import WorkflowNodes
 from zhai_agent.mirix_memory.memory_agent import MirixMemoryAgent
-
+from ..config import settings
 logger = logging.getLogger(__name__)
 
 class WorkflowManager:
@@ -36,7 +36,10 @@ class WorkflowManager:
 
         # 初始化 Checkpointer (连接 Redis)
         # 这里的参数需要匹配你的 Redis 配置
-        self.redis_conn = redis.Redis(host='localhost', port=6379, db=0,password="huafan123")
+        self.redis_conn = redis.Redis(host=settings.REDIS_HOST,
+                                       port=settings.REDIS_PORT,
+                                       db= settings.REDIS_DB,
+                                       password=settings.REDIS_PASSWORD)
         self.checkpointer = RedisSaver(self.redis_conn)
 
     # --- 节点包装方法 (保持不变) ---
