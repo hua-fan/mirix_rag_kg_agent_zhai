@@ -1,12 +1,23 @@
+# --- 核心框架 ---
 langgraph
-openai
 langchain
 langchain-community
-faiss-cpu
-pypdf
-python-dotenv
-transformers
-sentence-transformers
-wxauto
+langchain-huggingface  # 新增：修复向量模型导入错误
+openai
+
+# --- Web 服务 ---
+fastapi                # 新增：API 服务
+uvicorn                # 新增：ASGI 服务器
+
+# --- 数据库驱动 ---
+redis                  # 新增：修复 Redis 连接错误
 psycopg2-binary>=2.9.9
 neo4j>=5.0.0
+
+# --- AI & 数据处理 ---
+faiss-cpu
+pypdf
+transformers
+sentence-transformers
+python-dotenv
+requests               # 新增：网络请求检查
