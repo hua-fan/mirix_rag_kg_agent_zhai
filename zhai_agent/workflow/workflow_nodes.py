@@ -6,13 +6,16 @@ from zhai_agent.rag.rag_manager import RAGManager
 from zhai_agent.prompt.prompt_builder import PromptBuilder
 from zhai_agent.mirix_memory.memory_agent import MirixMemoryAgent
 from zhai_agent.kg.kg_manager import KGManager
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage
 from zhai_agent.utils.trans_messages_to_string import trans_messages_to_string
 from langchain.schema import Document
 from zhai_agent.prompt.mirix_memory_prompt import build_mirix_memory_prompt
 from zhai_agent.kg.kg_tools import get_kg_tools
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from zhai_agent.memory.MCPContextManager import get_mcp_context
+from zhai_agent.memory.shortmemory import get_shortmemory_instance
+
+
+MEMORY_UPDATE_INTERVAL = 3  # 每3轮对话更新一次记忆
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -37,6 +40,22 @@ class WorkflowNodes:
         self.prompt_builder = prompt_builder or PromptBuilder()
         # 优先使用传入的mirix_agent参数，如果没有传入才创建默认实例
         self.mirix_agent = mirix_agent or MirixMemoryAgent()
+        # --- 新增：初始化短期记忆管理器 ---
+        # 你可以根据需要配置 host, port 等参数，或者从配置文件读取
+        try:
+            self.short_memory = get_shortmemory_instance(
+                host='localhost', 
+                port=6379, 
+                db=0, 
+                password = "huafan123",
+                memory_ttl=3600,  # 1小时过期
+                max_memory_size=20 # 保留最近20条
+            )
+            logger.info("✅ 短期记忆模块(Redis)初始化成功")
+        except Exception as e:
+            logger.error(f"❌ 短期记忆模块初始化失败: {e}")
+            self.short_memory = None
+        # --------------------------------
         # 初始化知识图谱管理器
         try:
             self.kg_manager = KGManager()
@@ -135,7 +154,7 @@ class WorkflowNodes:
             # 创建AI消息并添加到状态
             ai_message = AIMessage(content=ai_response)
             logger.info(f"纯聊天回复: {ai_response[:100]}...")
-            
+            state.round+=1
         except Exception as e:
             logger.error(f"聊天节点出错: {str(e)}")
             # 添加错误回复
@@ -143,36 +162,6 @@ class WorkflowNodes:
             ai_message = AIMessage(content=error_response)
 
         return {"messages": [ai_message]}
-    
-    def _get_memory_context(self, state: ChatState) -> str:
-        """
-        获取记忆上下文，优先使用mirix记忆
-        """
-        try:
-            # 尝试获取mirix记忆
-            user_name = state.user_name
-            if user_name:
-                conversation_buffer = trans_messages_to_string(state.messages[-10:])
-                memory_context = self.mirix_agent.extract_memory_for_system_prompt(
-                    conversation_buffer, user_name
-                )
-                if memory_context:
-                    return f"用户记忆信息：\n{memory_context}"
-        except Exception as e:
-            logger.warning(f"获取mirix记忆失败: {str(e)}")
-        
-        # 回退到普通记忆
-        try:
-            user_id = state.user_id
-            if user_id in self.context_managers:
-                context_manager = self.context_managers[user_id]
-                memories = context_manager.get_context(include_long_memory=True, limit=10)
-                if memories:
-                    return self._format_conversation_history(memories)
-        except Exception as e:
-            logger.warning(f"获取普通记忆失败: {str(e)}")
-        
-        return "暂无相关记忆信息"
     
     
     
@@ -269,7 +258,7 @@ class WorkflowNodes:
         )
         state.memory_context = memory_context
         
-        return state.model_dump()
+        return {"memory_context",memory_context}
 
     def kg_search_node(self, state: ChatState) -> Dict[str, Any]:
         """
@@ -341,40 +330,6 @@ class WorkflowNodes:
         
         return {"kg_context": kg_context_str}
 
-    def normal_memory_node(self, state: ChatState) -> Dict[str, Any]:
-        """
-        普通记忆节点，用于获取基于用户ID的记忆上下文
-        Args:
-            state: 聊天状态
-        Returns:
-            更新后的状态字典
-        """
-        # 使用user_id作为会话标识符
-        user_id = state.user_id
-        
-        # 如果用户还没有上下文管理器，创建一个
-        if user_id not in self.context_managers:
-            self.context_managers[user_id] = get_mcp_context(
-                user_id=user_id,
-                redis_password='huafan123',
-                pg_password='huafan123'
-            )
-        
-        # 获取当前用户的上下文管理器
-        context_manager = self.context_managers[user_id]
-        
-        # 从上下文管理器获取记忆（包括短期和长期记忆）
-        previous_messages = context_manager.get_context(include_long_memory=True, limit=10)
-        logger.info(f"从MCPContextManager加载的消息数量: {len(previous_messages)}")
-        
-        # 格式化对话历史
-        conversation_history = self._format_conversation_history(previous_messages)
-
-        self.prompt_builder.build_memory_prompt(conversation_history)
-        
-        return state.model_dump()
-
-
     def _retrieve_documents(self, user_message: str) -> List[Document]:
         """
         检索相关文档
@@ -405,38 +360,19 @@ class WorkflowNodes:
         """
         return self.rag_manager.reRank(retrieved_docs, user_message)
     
-
-    def _format_conversation_history(self, previous_messages: List[HumanMessage | AIMessage]) -> str:
-        """
-        格式化对话历史
-        Args:
-            previous_messages: 历史消息列表
-        Returns:
-            str: 格式化的对话历史
-        """
-        conversation_history = ""
-        if previous_messages:
-            for msg in previous_messages:
-                if msg.type == 'human':
-                    conversation_history += f"用户: {msg.content}\n"
-                elif msg.type == 'ai':
-                    conversation_history += f"助手: {msg.content}\n"
-            # 移除最后一个换行符
-            if conversation_history:
-                conversation_history = conversation_history.rstrip('\n')
-            logger.info("已添加对话历史到提示中")
-        else:
-            logger.info("无对话历史")
-        return conversation_history
-
-
     def _generate_response(self, query: str, state: ChatState) -> str:
         """
         生成AI响应
         """
+        all_messages = state.messages
+        history_messages = all_messages[:-1]
+        chat_history_str = trans_messages_to_string(history_messages[-10:])
+
+        state.short_memory_context = chat_history_str
         # 此时是从 state 中读取数据，而不是从 prompt_builder 的内部变量读取
         final_prompt = self.prompt_builder.build_final_prompt(
             query=query,
+            chat_history=chat_history_str,
             memory_context=state.memory_context,
             rag_context=state.rag_context,
             kg_context=state.kg_context
@@ -447,72 +383,120 @@ class WorkflowNodes:
     
     def store_mirix_memory_node(self, state: ChatState) -> Dict[str, Any]:
         """
-        MIRIX记忆保存更新节点，基于用户姓名保存记忆
-        Args:
-            state: 聊天状态
-        Returns:
-            更新后的状态字典
+        MIRIX记忆保存更新节点
+        优化：仅在指定轮次，将【最近的新增对话】同步到长期记忆
         """
-        # 使用user_name标识用户
+        # 1. 检查轮次是否命中更新间隔
+        # 注意：要确保 state.round 在 load_short_memory_node 中被正确计算
+        if state.round <= 0 or state.round % MEMORY_UPDATE_INTERVAL != 0:
+            return {}
+        
         user_name = state.user_name
-        self.mirix_agent.add_memory(trans_messages_to_string(state.messages), user_name=user_name)
-        return state.model_dump()
-      
+        
+        # 2. 【核心优化】只截取最近 MEMORY_UPDATE_INTERVAL 轮的消息
+        # 假设每轮 = User + AI (2条消息)
+        # 如果间隔是3轮，就取最近6条
+        msg_count_to_extract = MEMORY_UPDATE_INTERVAL * 2
+        
+        # 保护逻辑：如果历史消息总数少于要截取的数量，就全取
+        all_messages = state.messages
+        recent_messages = all_messages[-msg_count_to_extract:] if len(all_messages) > msg_count_to_extract else all_messages
+        
+        # 3. 转换并发送
+        memory_content = trans_messages_to_string(recent_messages)
+        
+        # 防止空内容调用
+        if not memory_content.strip():
+            return {}
 
-    def store_memory_node(self, state: ChatState) -> Dict[str, Any]:
-        """
-        记忆存储节点，用于将对话内容保存到短期和长期记忆，基于用户ID保存
-        Args:
-            state: 聊天状态
-        Returns:
-            dict: 更新后的状态
-        """
         try:
-            # 确保有足够的消息进行存储
-            if len(state.messages) >= 2:
-                # 获取最后一条用户消息和AI回复
-                user_msg = state.messages[-2]
-                ai_msg = state.messages[-1]
-                # 使用user_id作为会话标识
-                user_id = state.user_id
-                
-                # 检查是否有该用户的上下文管理器
-                if user_id in self.context_managers:
-                    context_manager = self.context_managers[user_id]
-                    
-                    # 使用上下文管理器存储消息
-                    self._store_messages(context_manager, user_msg, ai_msg)
-                    
-                    # 获取并打印统计信息
-                    stats = context_manager.get_stats()
-                    logger.info(f"用户{user_id}统计: 短期记忆{stats['short_memory_count']}条, 长期记忆{stats['long_memory_count']}条")
+            logger.info(f"正在更新Mirix长期记忆 (轮次: {state.round}, 同步消息数: {len(recent_messages)})")
+            self.mirix_agent.add_memory(memory_content, user_name=user_name)
         except Exception as e:
-            logger.error(f"保存对话到记忆时出错: {str(e)}")
-        return state.model_dump()
+            logger.error(f"Mirix记忆更新失败: {str(e)}")
 
+        return {}
     
-    def _store_messages(self, context_manager, user_msg, ai_msg):
+    def store_short_memory_node(self, state: ChatState) -> Dict[str, Any]:
         """
-        存储用户消息和AI回复
+        短期记忆保存节点，将当前会话的历史记录同步到 Redis。
+        
         Args:
-            context_manager: 上下文管理器实例
-            user_msg: 用户消息
-            ai_msg: AI回复
+            state: 聊天状态，包含 messages 列表和用户信息
+        Returns:
+            dict: 空字典（此节点只负责副作用，不更新 state）
         """
-        # 保存用户消息
-        context_manager.add_user_message(
-            content=getattr(user_msg, 'content', ''),
-            importance_score=0.5  # 中等重要性
-        )
-        
-        # 保存AI回复
-        context_manager.add_ai_message(
-            content=getattr(ai_msg, 'content', ''),
-            importance_score=0.5  # 中等重要性
-        )
-        
-        user_id = context_manager.user_id
-        logger.info(f"对话内容已通过MCPContextManager保存到用户: {user_id}")
+        if not self.short_memory:
+            logger.warning("短期记忆模块未初始化，跳过保存")
+            return {}
+
+        try:
+            # 1. 获取唯一标识符 (优先使用 user_name 或 session_id)
+            # 注意：ShortMemory 使用 user_id 作为 key 的后缀
+            user_id = state.user_name if state.user_name else "default_user"
+            
+            # 2. 获取当前的消息列表
+            # state.messages 通常包含 LangChain 的 Message 对象 (HumanMessage, AIMessage)
+            # ShortMemory.store_memory 内部已经处理了对象转字典的逻辑 (getattr)，
+            # 所以我们可以直接传入 Message 对象列表。
+            current_messages = state.messages
+            
+            if not current_messages:
+                return {}
+
+            # 3. 调用存储方法
+            # store_memory 会自动截取最新的 max_memory_size 条并覆盖存储
+            success = self.short_memory.store_memory(
+                user_id=user_id, 
+                messages=current_messages
+            )
+            
+            if success:
+                logger.info(f"用户 [{user_id}] 的短期记忆已更新，当前消息数: {len(current_messages)}")
+            else:
+                logger.error(f"用户 [{user_id}] 的短期记忆保存失败")
+
+        except Exception as e:
+            logger.error(f"执行短期记忆存储节点时出错: {str(e)}")
+            
+        return {}
+      
+    def load_short_memory_node(self, state: ChatState) -> Dict[str, Any]:
+        """
+        加载短期记忆节点 - 用于在对话开始前从 Redis 拉取历史
+        """
+        if not self.short_memory:
+            return {}
+            
+        try:
+            user_id = state.user_name if state.user_name else "default_user"
+            
+            # 从 Redis 获取 List[Dict]
+            history_dicts = self.short_memory.get_memory(user_id)
+            
+            # 将 Dict 转换回 LangChain Message 对象 (重要！)
+            from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+            
+            loaded_messages = []
+            for msg in history_dicts:
+                role = msg.get("type")
+                content = msg.get("content", "")
+                if role == "human":
+                    loaded_messages.append(HumanMessage(content=content))
+                elif role == "ai":
+                    loaded_messages.append(AIMessage(content=content))
+                elif role == "system":
+                    loaded_messages.append(SystemMessage(content=content))
+            
+            if loaded_messages:
+                logger.info(f"成功加载 {len(loaded_messages)} 条历史消息")
+                # 注意：根据你的 Graph 逻辑，这里可能需要是覆盖还是追加
+                return {"messages": loaded_messages}
+                
+        except Exception as e:
+            logger.error(f"加载短期记忆失败: {e}")
+            
+        return {}
     
 
   

@@ -20,6 +20,7 @@ class ChatState(BaseModel):
     session_id: str = Field(default="default_session")
     user_name : str = Field(default="default_user")
    
+    short_memory_context :str = ""
     memory_context: str = ""
     rag_context: str = ""
     kg_context: str = ""

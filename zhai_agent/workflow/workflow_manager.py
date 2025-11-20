@@ -34,6 +34,9 @@ class WorkflowManager:
         )
 
     # --- 节点包装方法 (保持不变) ---
+    def load_short_memory_node(self, state: ChatState) -> Dict[str, Any]:
+        return self.workflow_nodes.load_short_memory_node(state)
+
     def get_mirix_memory_node(self, state: ChatState) -> Dict[str, Any]:
         return self.workflow_nodes.mirix_memory_node(state)
 
@@ -52,6 +55,8 @@ class WorkflowManager:
     def llm_kg_node(self, state: ChatState) -> Dict[str, Any]:
         return self.workflow_nodes.llm_kg_node(state)
     
+    def store_short_memory_node(self,state:ChatState)-> Dict[str,Any]:
+        return self.workflow_nodes.store_short_memory_node(state)
     # --- 核心工作流构建 ---
 
     def create_workflow(self):
@@ -66,6 +71,7 @@ class WorkflowManager:
         workflow = StateGraph(ChatState)
         
         # 1. 添加所有节点
+        workflow.add_node("load_short_memory",self.load_short_memory_node)
         workflow.add_node("get_memory", self.get_mirix_memory_node)
         workflow.add_node("rag_search", self.rag_node)
         workflow.add_node("kg_search", self.kg_search_node)
@@ -74,6 +80,7 @@ class WorkflowManager:
         # 写操作节点
         workflow.add_node("kg_build", self.llm_kg_node)
         workflow.add_node("save_memory", self.store_mirix_memory_node)
+        workflow.add_node("save_short_memory",self.store_short_memory_node)
         
         # 2. 定义边 (Edges)
         
@@ -93,8 +100,9 @@ class WorkflowManager:
         # 此时用户已经拿到回复，后台同时保存记忆和构建图谱
         workflow.add_edge("generate_answer", "save_memory")
         workflow.add_edge("generate_answer", "kg_build")
-        
+        workflow.add_edge("generate_answer", "save_short_memory")
         # 结束
+        workflow.add_edge("save_short_memory",END)
         workflow.add_edge("save_memory", END)
         workflow.add_edge("kg_build", END)
         

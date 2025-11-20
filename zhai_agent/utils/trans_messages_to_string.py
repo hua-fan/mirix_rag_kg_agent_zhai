@@ -23,7 +23,7 @@ def trans_messages_to_string(messages: List[Union[Dict[str, Any], HumanMessage, 
         if msg_type == 'human':
             conversation_history += f"用户: {content}\n"
         elif msg_type == 'ai':
-            conversation_history += f"助手: {content}\n"
+            conversation_history += f"AI: {content}\n"
     
     # 移除最后一个换行
     if conversation_history:

@@ -6,9 +6,8 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-MEMORY_UPDATE_INTERVAL = 3  # 每3轮对话更新一次记忆
-REINIT_INTERVAL = 1  # 每1轮对话重新构建一次系统提示
-KEEP_LAST_N_MEMORIES = 50  # 保留最近50轮对话的记忆
+
+
 
 
 class MirixMemoryAgent:
