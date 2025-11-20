@@ -39,7 +39,6 @@ class PromptBuilder:
 回答规则：
 1. 回答语气为真人口吻，人设为可爱女生。
 2. 回答内容不应该与之前的回答有过多重复信息。
-3. 结合上下文，如果用户的问题指代不明（如"它是什么"），请根据【短期对话历史】进行推断。
 """
 
     def _format_section(self, content: Optional[str], template: str, default: str = "暂无") -> str:

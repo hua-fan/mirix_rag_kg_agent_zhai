@@ -3,8 +3,9 @@ import logging
 from langgraph.graph.state import StateGraph
 from langgraph.graph import END
 from typing import Dict, Any
-from langchain_core.messages import HumanMessage # 建议提到顶部导入
-
+from langchain_core.messages import HumanMessage 
+import redis
+from langgraph.checkpoint.redis import RedisSaver
 from zhai_agent.models.chat_state import ChatState
 from zhai_agent.rag.rag_manager import RAGManager
 from zhai_agent.workflow.workflow_nodes import WorkflowNodes
@@ -33,10 +34,12 @@ class WorkflowManager:
             mirix_agent=custom_mirix_agent
         )
 
-    # --- 节点包装方法 (保持不变) ---
-    def load_short_memory_node(self, state: ChatState) -> Dict[str, Any]:
-        return self.workflow_nodes.load_short_memory_node(state)
+        # 初始化 Checkpointer (连接 Redis)
+        # 这里的参数需要匹配你的 Redis 配置
+        self.redis_conn = redis.Redis(host='localhost', port=6379, db=0,password="huafan123")
+        self.checkpointer = RedisSaver(self.redis_conn)
 
+    # --- 节点包装方法 (保持不变) ---
     def get_mirix_memory_node(self, state: ChatState) -> Dict[str, Any]:
         return self.workflow_nodes.mirix_memory_node(state)
 
@@ -55,8 +58,6 @@ class WorkflowManager:
     def llm_kg_node(self, state: ChatState) -> Dict[str, Any]:
         return self.workflow_nodes.llm_kg_node(state)
     
-    def store_short_memory_node(self,state:ChatState)-> Dict[str,Any]:
-        return self.workflow_nodes.store_short_memory_node(state)
     # --- 核心工作流构建 ---
 
     def create_workflow(self):
@@ -71,7 +72,6 @@ class WorkflowManager:
         workflow = StateGraph(ChatState)
         
         # 1. 添加所有节点
-        workflow.add_node("load_short_memory",self.load_short_memory_node)
         workflow.add_node("get_memory", self.get_mirix_memory_node)
         workflow.add_node("rag_search", self.rag_node)
         workflow.add_node("kg_search", self.kg_search_node)
@@ -80,36 +80,32 @@ class WorkflowManager:
         # 写操作节点
         workflow.add_node("kg_build", self.llm_kg_node)
         workflow.add_node("save_memory", self.store_mirix_memory_node)
-        workflow.add_node("save_short_memory",self.store_short_memory_node)
-        
+
         # 2. 定义边 (Edges)
         
-        # 入口 -> 加载记忆
+        # 1. 设置唯一入口：先加载短期记忆
+        # 这样确保 state["messages"] 最先被填充历史记录
         workflow.set_entry_point("get_memory")
         
-        # 加载记忆 -> 双路并行检索 (读操作)
+        # 2. 长期记忆获取完毕 -> 开启并行检索 (RAG + KG)
         workflow.add_edge("get_memory", "rag_search")
         workflow.add_edge("get_memory", "kg_search")
         
-        # 检索完成 -> 生成回复
-        # 注意：这里移除了 kg_build，因为生成回复不需要等待图谱构建完成
+        # 3. 检索汇聚 -> 生成回复
         workflow.add_edge("rag_search", "generate_answer")
         workflow.add_edge("kg_search", "generate_answer")
         
-        # 生成回复 -> 双路并行存储 (写操作)
-        # 此时用户已经拿到回复，后台同时保存记忆和构建图谱
+        # 4. 生成回复 -> 并行后台任务 (存记忆、建图谱)
         workflow.add_edge("generate_answer", "save_memory")
         workflow.add_edge("generate_answer", "kg_build")
-        workflow.add_edge("generate_answer", "save_short_memory")
-        # 结束
-        workflow.add_edge("save_short_memory",END)
+        
+        # 5. 结束
         workflow.add_edge("save_memory", END)
         workflow.add_edge("kg_build", END)
         
-        # 编译工作流
         self.app = workflow.compile()
         return self.app
-    
+     
     def process_user_request(self, user_message: str, user_name: str = "default_user", session_id: str = "default_session") -> Dict[str, Any]:
         """
         处理用户请求
@@ -117,20 +113,18 @@ class WorkflowManager:
         if self.app is None:
             self.create_workflow()
         
-        # 【修改点】构建输入字典而不是直接构建 State 对象
-        # 这样 LangGraph 才能利用 ChatState 中的 Annotated 逻辑正确追加消息
+        config = {"configurable": {"thread_id": session_id}}
+    
         inputs = {
-            "messages": [HumanMessage(content=user_message)],
+            "messages": [HumanMessage(content=user_message)], 
             "user_name": user_name,
-            "session_id": session_id,
-            "query": user_message,
-            # 其他字段使用默认值
+            "query": user_message
         }
         
         # 执行工作流
         try:
             # invoke 接受字典作为输入
-            result = self.app.invoke(inputs)
+            result = self.app.invoke(inputs,config=config)
             return result
         except Exception as e:
             logger.error(f"工作流执行出错: {e}")
