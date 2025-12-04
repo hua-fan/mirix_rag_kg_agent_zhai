@@ -7,7 +7,7 @@ from zhai_agent.prompt.prompt_builder import PromptBuilder
 from zhai_agent.mirix_memory.memory_agent import MirixMemoryAgent
 from zhai_agent.kg.kg_manager import KGManager
 from zhai_agent.utils.trans_messages_to_string import trans_messages_to_string
-from langchain.schema import Document
+from langchain_core.documents import Document
 from zhai_agent.prompt.mirix_memory_prompt import build_mirix_memory_prompt
 from zhai_agent.kg.kg_tools import get_kg_tools
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -388,15 +388,15 @@ class WorkflowNodes:
         """
         # 1. 检查轮次是否命中更新间隔
         # 注意：要确保 state.round 在 load_short_memory_node 中被正确计算
-        if state.round <= 0 or state.round % MEMORY_UPDATE_INTERVAL != 0:
-            return {}
+        # if state.round <= 0 or state.round % MEMORY_UPDATE_INTERVAL != 0:
+        #     return {}
         
         user_name = state.user_name
         
-        # 2. 【核心优化】只截取最近 MEMORY_UPDATE_INTERVAL 轮的消息
+        # 2. 只截取最近 MEMORY_UPDATE_INTERVAL 轮的消息
         # 假设每轮 = User + AI (2条消息)
         # 如果间隔是3轮，就取最近6条
-        msg_count_to_extract = MEMORY_UPDATE_INTERVAL * 2
+        msg_count_to_extract =  2
         
         # 保护逻辑：如果历史消息总数少于要截取的数量，就全取
         all_messages = state.messages

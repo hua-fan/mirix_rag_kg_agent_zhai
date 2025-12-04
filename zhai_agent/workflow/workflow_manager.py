@@ -34,14 +34,6 @@ class WorkflowManager:
             mirix_agent=custom_mirix_agent
         )
 
-        # 初始化 Checkpointer (连接 Redis)
-        # 这里的参数需要匹配你的 Redis 配置
-        self.redis_conn = redis.Redis(host=settings.REDIS_HOST,
-                                       port=settings.REDIS_PORT,
-                                       db= settings.REDIS_DB,
-                                       password=settings.REDIS_PASSWORD)
-        self.checkpointer = RedisSaver(self.redis_conn)
-
     # --- 节点包装方法 (保持不变) ---
     def get_mirix_memory_node(self, state: ChatState) -> Dict[str, Any]:
         return self.workflow_nodes.mirix_memory_node(state)
